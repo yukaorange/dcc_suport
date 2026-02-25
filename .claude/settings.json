@@ -1,0 +1,35 @@
+{
+    "permissions": {
+        "allow": [
+            "Bash(git status:*)",
+            "Bash(git diff:*)",
+            "Bash(git log:*)",
+            "Bash(git branch:*)",
+            "Bash(git fetch:*)",
+            "Bash(git show:*)",
+            "Bash(gh issue:*)",
+            "Bash(gh pr view:*)",
+            "Read",
+            "WebSearch",
+            "WebFetch",
+            "Bash(cat:*)",
+            "Bash(ls:*)",
+            "Bash(find:*)",
+            "Bash(grep:*)",
+            "Bash(rg:*)",
+            "Bash(head:*)",
+            "Bash(tail:*)",
+            "Bash(wc:*)"
+        ],
+        "deny": [
+            "Read(**/.env)",
+            "Read(**/.env.*)",
+            "Bash(rm:*)",
+            "Bash(sudo:*)"
+        ]
+    },
+    "env": {
+        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+    },
+    "enableAllProjectMcpServers": false
+}

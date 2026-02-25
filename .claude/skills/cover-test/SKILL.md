@@ -56,3 +56,16 @@ task:現在の実装内容をもとに、既存のテストケースをアップ
   * モック使用可
   * happy-pathのテストのみ
   * React Componentに対しては、`vitest browser mode`を使用する。(必ずドキュメントをWebSearch Toolで検索すること！)
+
+## STEP 6: codex によるテストレビュー
+
+STEP5のテスト実装後、codex にテストコードをレビューさせる。
+codex を呼ぶときは timeout を延長すること。(7分以上を推奨)
+
+```bash
+codex exec -m gpt-5.3-codex "このテストコードをレビューして。瑣末な点への不要なリプライはするな。致命的な点への指摘に尽力せよ。観点: (1)テストが実際に対象の振る舞いを検証できているか (2)エッジケースの見落とし (3)実装詳細への過度な依存(リファクタリング耐性) : $(git diff origin/main -- '**/tests/**') (ref: CLAUDE.md, .claude/rules/coderule.md, .claude/rules/convention.md)"
+```
+
+* codex の指摘があればユーザーに報告する。修正するかどうかはユーザーが判断する
+* codex の指摘がなければ「追加の問題は検出されなかった」と報告して完了
+ï

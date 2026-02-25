@@ -33,7 +33,7 @@ Adobe CC（Illustrator / Photoshop / After Effects）でグラフィック制作
 
 ### フェーズ2: 自律コーチング（自動・AIプッシュ）
 
-```
+```md
 5秒ごとのループ:
   ① 対象ウィンドウのスクリーンショットを取得
   ② 前回画像とのピクセル差分を算出（ローカル処理）
@@ -62,7 +62,7 @@ Adobe CC（Illustrator / Photoshop / After Effects）でグラフィック制作
 
 ### コーチングの具体例
 
-```
+```md
 ユーザー: 「このリファレンスみたいな、奥行きのあるグラデーション背景を作りたい」
 
 AI（プラン生成）:
@@ -147,7 +147,7 @@ AIが「メニュー > フィルター > ぼかし > ぼかし（ガウス）」
 
 ### ファイル構成
 
-```
+```md
 skills/
 ├── illustrator.md       # Illustrator CC のメニュー構造、パネル一覧、ショートカット
 ├── photoshop.md         # Photoshop CC のメニュー構造

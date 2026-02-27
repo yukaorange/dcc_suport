@@ -1,0 +1,1 @@
+// Pixel diff detection module

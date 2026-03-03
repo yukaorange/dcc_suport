@@ -6,3 +6,5 @@ sessions/
 .work/
 .env
 .env.*
+verify-report.md
+src/verify/tmp/

@@ -5,9 +5,16 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify": "bun run src/verify/run-all.ts",
+    "verify:streaming": "bun run src/verify/verify-streaming.ts",
+    "verify:image": "bun run src/verify/verify-image.ts",
+    "verify:session": "bun run src/verify/verify-session.ts",
+    "verify:agents": "bun run src/verify/verify-agents.ts",
+    "verify:prompt": "bun run src/verify/verify-system-prompt.ts"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.63",
     "pixelmatch": "^7.0.0",
     "screenshot-desktop": "^1.15.3",
     "sharp": "^0.34.0"

@@ -18,9 +18,9 @@ Adobe CC（Illustrator / Photoshop / After Effects）でグラフィック制作
 - **sharp** — 画像リサイズ（トークン節約）
 - **Claude Code CLI** — AI呼び出し（サブスク想定、API従量課金は使わない）
 
-## ドキュメント
+## 開発時ドキュメント
 
-詳細は [docs/README.md](./docs/README.md) を参照。
+開発の方針は [docs/README.md](./docs/README.md) を参照。
 
 ## ステータス
 

@@ -758,4 +758,5 @@ adobe-coach/
 
 - [ ] adb-mcp統合（Photoshop優先）
 - [ ] モデル切り替え（Codex等）のアダプター層
+- [ ] デスクトップアプリ化（Electron / Tauri）— DCC全画面使用時にオーバーレイウィンドウとしてコーチングUIを常時表示
 - [ ] README・セットアップドキュメント

@@ -8,13 +8,17 @@ on:
     branches:
       - main
 
+concurrency:
+  group: check-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   typecheck:
     name: TypeScript TypeCheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latestï
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

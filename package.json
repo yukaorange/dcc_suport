@@ -6,6 +6,9 @@
     "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
     "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "check": "bun run typecheck && biome ci .",
     "verify": "bun run src/verify/run-all.ts",
     "verify:streaming": "bun run src/verify/verify-streaming.ts",
     "verify:image": "bun run src/verify/verify-image.ts",
@@ -20,6 +23,7 @@
     "sharp": "^0.34.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.5",
     "@types/bun": "latest",
     "typescript": "^5.8.0"
   }

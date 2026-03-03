@@ -1,6 +1,6 @@
 import {
-  query,
   type AgentDefinition,
+  query,
   type Options as SDKOptions,
 } from "@anthropic-ai/claude-agent-sdk";
 
@@ -23,12 +23,7 @@ type EngineFailure = {
 
 export type EngineResult = EngineSuccess | EngineFailure;
 
-type PermissionMode =
-  | "default"
-  | "acceptEdits"
-  | "bypassPermissions"
-  | "plan"
-  | "dontAsk";
+type PermissionMode = "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk";
 
 const MAX_TIMEOUT_MS = 300_000;
 
@@ -59,15 +54,13 @@ function acquireQueryLock(timeoutMs: number): EngineFailure | number {
         message: `Previous query still running (elapsed: ${elapsed}ms). Skipped to prevent accumulation.`,
       };
     }
-    console.warn(
-      `WARNING: Stale query lock detected (${elapsed}ms). Allowing new query.`,
-    );
+    console.warn(`WARNING: Stale query lock detected (${elapsed}ms). Allowing new query.`);
   }
 
   const startTime = Date.now();
   activeQueryStartedAt = startTime;
   activeQueryTimeoutMs = timeoutMs;
-  return startTime;// クエリ開始時刻
+  return startTime; // クエリ開始時刻
 }
 
 function releaseQueryLock(startTime: number): void {
@@ -76,12 +69,43 @@ function releaseQueryLock(startTime: number): void {
   }
 }
 
-export async function invokeClaude(
-  options: InvokeClaudeOptions,
-): Promise<EngineResult> {
-  const timeoutMs = Math.min(options.timeoutMs ?? 60_000, MAX_TIMEOUT_MS);
+type MessageExtract = {
+  readonly sessionId: string | undefined;
+  readonly resultText: string | undefined;
+};
 
-  // InvokeClaudeOptions と SDK の query() ではキー名や構造が異なるものもあるため、ここで変換する
+function isTypedMessage(msg: unknown): msg is Record<string, unknown> & { type: string } {
+  return typeof msg === "object" && msg !== null && "type" in msg;
+}
+
+function extractFromMessage(message: unknown): MessageExtract {
+  if (!isTypedMessage(message)) return { sessionId: undefined, resultText: undefined };
+
+  let sessionId: string | undefined;
+  let resultText: string | undefined;
+
+  if (
+    message.type === "system" &&
+    "subtype" in message &&
+    message.subtype === "init" &&
+    "session_id" in message
+  ) {
+    sessionId = message.session_id as string;
+  }
+
+  if (
+    message.type === "result" &&
+    "subtype" in message &&
+    message.subtype === "success" &&
+    "result" in message
+  ) {
+    resultText = message.result as string;
+  }
+
+  return { sessionId, resultText };
+}
+
+function buildQueryOptions(options: InvokeClaudeOptions): SDKOptions {
   const queryOptions: SDKOptions = {};
 
   if (options.sessionId) {
@@ -119,6 +143,13 @@ export async function invokeClaude(
     queryOptions.maxTurns = options.maxTurns;
   }
 
+  return queryOptions;
+}
+
+export async function invokeClaude(options: InvokeClaudeOptions): Promise<EngineResult> {
+  const timeoutMs = Math.min(options.timeoutMs ?? 60_000, MAX_TIMEOUT_MS);
+  const queryOptions = buildQueryOptions(options);
+
   const queryStartTimeOrLockError = acquireQueryLock(timeoutMs);
   if (typeof queryStartTimeOrLockError !== "number") return queryStartTimeOrLockError;
   const myStartTime = queryStartTimeOrLockError;
@@ -129,95 +160,70 @@ export async function invokeClaude(
   const timer = setTimeout(() => abortController.abort(), timeoutMs);
 
   // ストリーミングメッセージを逐次受信し、sessionId と最終結果テキストを抽出する
-  const execution = async (): Promise<EngineResult> => {
-    const rawMessages: unknown[] = [];
-    let sessionId: string | undefined;
-    let resultText: string | undefined;
+  const rawMessages: unknown[] = [];
+  let sessionId: string | undefined;
+  let resultText: string | undefined;
 
-    try {
-      // queryStream のデータフロー:
-      //
-      //   engine.ts          SDK (query)         claude CLI         Anthropic API
-      //   ─────────          ───────────         ──────────         ─────────────
-      //   for await ◄─ yield ◄─ for await ◄─ stdout ◄─── streaming response
-      //       │                     │
-      //       │  next()             │  next()
-      //       ▼                     ▼
-      //   message を処理      chunk を yield
-      const queryStream = query({
-        prompt: options.prompt,
-        options: {
-          ...queryOptions,
-          abortController,
-        },
-      });
+  try {
+    // queryStream のデータフロー:
+    //
+    //   engine.ts          SDK (query)         claude CLI         Anthropic API
+    //   ─────────          ───────────         ──────────         ─────────────
+    //   for await ◄─ yield ◄─ for await ◄─ stdout ◄─── streaming response
+    //       │                     │
+    //       │  next()             │  next()
+    //       ▼                     ▼
+    //   message を処理      chunk を yield
+    const queryStream = query({
+      prompt: options.prompt,
+      options: {
+        ...queryOptions,
+        abortController,
+      },
+    });
 
-      for await (const message of queryStream) {
-        rawMessages.push(message);
-
-        if (
-          typeof message === "object" &&
-          message !== null &&
-          "type" in message &&
-          message.type === "system" &&
-          "subtype" in message &&
-          message.subtype === "init" &&
-          "session_id" in message
-        ) {
-          sessionId = message.session_id as string;
-        }
-
-        if (
-          typeof message === "object" &&
-          message !== null &&
-          "type" in message &&
-          message.type === "result" &&
-          "subtype" in message &&
-          message.subtype === "success" &&
-          "result" in message
-        ) {
-          resultText = (message as { result: string }).result;
-        }
-      }
-    } catch (e) {
-      clearTimeout(timer);
-
-      if (abortController.signal.aborted) {
-        return {
-          isOk: false,
-          errorCode: "TIMEOUT",
-          message: `Query timed out after ${timeoutMs}ms`,
-        };
-      }
-
-      return {
-        isOk: false,
-        errorCode: "SDK_ERROR",
-        message: e instanceof Error ? e.message : String(e),
-      };
-    } finally {
-      releaseQueryLock(myStartTime);
+    for await (const message of queryStream) {
+      rawMessages.push(message);
+      const extracted = extractFromMessage(message);
+      if (extracted.sessionId) sessionId = extracted.sessionId;
+      if (extracted.resultText) resultText = extracted.resultText;
     }
-
+  } catch (e) {
     clearTimeout(timer);
 
-    if (resultText === undefined || resultText.trim().length === 0) {
+    if (abortController.signal.aborted) {
       return {
         isOk: false,
-        errorCode: "EMPTY_RESULT",
-        message: "SDK returned no result",
+        errorCode: "TIMEOUT",
+        message: `Query timed out after ${timeoutMs}ms`,
       };
     }
 
     return {
-      isOk: true,
-      result: resultText,
-      sessionId,
-      rawMessages,
+      isOk: false,
+      errorCode: "SDK_ERROR",
+      message: e instanceof Error ? e.message : String(e),
     };
-  };
+  } finally {
+    releaseQueryLock(myStartTime);
+  }
 
-  return execution();
+  clearTimeout(timer);
+
+  if (resultText === undefined || resultText.trim().length === 0) {
+    return {
+      isOk: false,
+      errorCode: "EMPTY_RESULT",
+      message: "SDK returned no result",
+    };
+  }
+
+  return {
+    isOk: true,
+    result: resultText,
+    sessionId,
+    rawMessages,
+  };
 }
 
 type SessionCheckResult =

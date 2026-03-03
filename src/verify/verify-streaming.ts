@@ -66,8 +66,7 @@ async function verifyMessageStructure(): Promise<VerifyResult> {
 
   const typeReport = [...typeMap.entries()]
     .map(([type, subtypes]) => {
-      const subs =
-        subtypes.size > 0 ? ` (${[...subtypes].join(", ")})` : "";
+      const subs = subtypes.size > 0 ? ` (${[...subtypes].join(", ")})` : "";
       return `${type}${subs}`;
     })
     .join(" | ");
@@ -105,8 +104,7 @@ async function verifyAbortSignal(): Promise<VerifyResult> {
   const start = performance.now();
 
   const result = await invokeClaude({
-    prompt:
-      "1から1000までの素数をすべて列挙してください。省略せずに全て書いてください。",
+    prompt: "1から1000までの素数をすべて列挙してください。省略せずに全て書いてください。",
     timeoutMs,
     maxTurns: 1,
     permissionMode: "bypassPermissions",

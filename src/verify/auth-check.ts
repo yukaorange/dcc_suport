@@ -13,23 +13,20 @@ try {
       stderr: (data: string) => console.error("[stderr]", data),
     },
   })) {
-    if (
-      typeof message === "object" &&
-      message !== null &&
-      "type" in message
-    ) {
-      switch (message.type) {
+    if (typeof message === "object" && message !== null && "type" in message) {
+      const msg = message as Record<string, unknown>;
+      switch (msg.type) {
         case "system":
-          console.log(`[system] subtype=${(message as any).subtype}, session_id=${(message as any).session_id}`);
+          console.log(`[system] subtype=${msg.subtype}, session_id=${msg.session_id}`);
           break;
         case "result":
-          console.log(`[result] subtype=${(message as any).subtype}, result=${(message as any).result}`);
+          console.log(`[result] subtype=${msg.subtype}, result=${msg.result}`);
           break;
         case "assistant":
           console.log(`[assistant] received`);
           break;
         default:
-          console.log(`[${message.type}]`);
+          console.log(`[${msg.type}]`);
       }
     }
   }

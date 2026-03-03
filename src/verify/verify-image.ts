@@ -36,8 +36,7 @@ export async function verifyImage(): Promise<VerifyResult> {
       name: VERIFY_NAME,
       durationMs,
       error: `[${result.errorCode}] ${result.message}`,
-      fallback:
-        "base64エンコードでプロンプト埋め込み / テキスト説明に切替",
+      fallback: "base64エンコードでプロンプト埋め込み / テキスト説明に切替",
     };
   }
 
@@ -47,8 +46,7 @@ export async function verifyImage(): Promise<VerifyResult> {
       name: VERIFY_NAME,
       durationMs,
       error: `色の一致なし。応答: "${result.result.slice(0, 200)}"`,
-      fallback:
-        "base64エンコードでプロンプト埋め込み / テキスト説明に切替",
+      fallback: "base64エンコードでプロンプト埋め込み / テキスト説明に切替",
     };
   }
 

@@ -21,8 +21,7 @@ export async function verifySession(): Promise<VerifyResult> {
       name: VERIFY_NAME,
       durationMs,
       error: `初回呼び出し失敗: [${first.errorCode}] ${first.message}`,
-      fallback:
-        "毎回フルコンテキスト送信（5秒間隔ではトークン消費が爆発するため非現実的）",
+      fallback: "毎回フルコンテキスト送信（5秒間隔ではトークン消費が爆発するため非現実的）",
     };
   }
 
@@ -33,8 +32,7 @@ export async function verifySession(): Promise<VerifyResult> {
       name: VERIFY_NAME,
       durationMs,
       error: `初回でsessionIdが取得できなかった。応答: "${first.result.slice(0, 100)}"`,
-      fallback:
-        "毎回フルコンテキスト送信（5秒間隔ではトークン消費が爆発するため非現実的）",
+      fallback: "毎回フルコンテキスト送信（5秒間隔ではトークン消費が爆発するため非現実的）",
     };
   }
 
@@ -54,8 +52,7 @@ export async function verifySession(): Promise<VerifyResult> {
       name: VERIFY_NAME,
       durationMs,
       error: `継続呼び出し失敗: [${second.errorCode}] ${second.message}`,
-      fallback:
-        "毎回フルコンテキスト送信（5秒間隔ではトークン消費が爆発するため非現実的）",
+      fallback: "毎回フルコンテキスト送信（5秒間隔ではトークン消費が爆発するため非現実的）",
     };
   }
 
@@ -65,8 +62,7 @@ export async function verifySession(): Promise<VerifyResult> {
       name: VERIFY_NAME,
       durationMs,
       error: `名前「${SECRET_NAME}」が応答に含まれない。応答: "${second.result.slice(0, 200)}"`,
-      fallback:
-        "毎回フルコンテキスト送信（5秒間隔ではトークン消費が爆発するため非現実的）",
+      fallback: "毎回フルコンテキスト送信（5秒間隔ではトークン消費が爆発するため非現実的）",
     };
   }
 

@@ -1,9 +1,9 @@
 import { writeFile } from "node:fs/promises";
 import type { VerifyResult } from "./types";
-import { verifyStreaming } from "./verify-streaming";
+import { verifyAgents } from "./verify-agents";
 import { verifyImage } from "./verify-image";
 import { verifySession } from "./verify-session";
-import { verifyAgents } from "./verify-agents";
+import { verifyStreaming } from "./verify-streaming";
 import { verifySystemPrompt } from "./verify-system-prompt";
 
 type VerifyEntry = {
@@ -48,9 +48,7 @@ function generateReport(results: readonly VerifyResult[]): string {
   const now = new Date().toISOString().slice(0, 19).replace("T", " ");
   const passCount = results.filter((r) => r.status === "pass").length;
   const failCount = results.filter((r) => r.status === "fail").length;
-  const inconclusiveCount = results.filter(
-    (r) => r.status === "inconclusive",
-  ).length;
+  const inconclusiveCount = results.filter((r) => r.status === "inconclusive").length;
 
   const lines: string[] = [
     `# DCC-03 Verification Report`,
@@ -97,41 +95,57 @@ function generateReport(results: readonly VerifyResult[]): string {
   return lines.join("\n");
 }
 
-async function main(): Promise<void> {
-  console.log("=== DCC-03 Verification ===\n");
+function resultDetailText(r: VerifyResult): string {
+  switch (r.status) {
+    case "pass":
+      return r.detail;
+    case "fail":
+      return r.error;
+    case "inconclusive":
+      return r.reason;
+  }
+}
 
-  const allResults: VerifyResult[] = [];
+function statusIconChar(status: VerifyResult["status"]): string {
+  switch (status) {
+    case "pass":
+      return "+";
+    case "fail":
+      return "x";
+    case "inconclusive":
+      return "?";
+  }
+}
 
-  for (const verification of verifications) {
-    console.log(`[${verification.label}]`);
+async function runVerification(entry: VerifyEntry): Promise<VerifyResult[]> {
+  console.log(`[${entry.label}]`);
 
-    // @throws — SDK内部エラーが発生しうる
-    try {
-      const result = await verification.run();
-      const results = Array.isArray(result) ? result : [result];
-      allResults.push(...results);
+  // @throws — SDK内部エラーが発生しうる
+  try {
+    const result = await entry.run();
+    const results = Array.isArray(result) ? result : [result];
 
-      for (const r of results) {
-        const icon = r.status === "pass" ? "+" : r.status === "fail" ? "x" : "?";
-        console.log(`  [${icon}] ${r.name} (${Math.round(r.durationMs)}ms)`);
-      }
-    } catch (e) {
-      const errorResult: VerifyResult = {
-        status: "fail",
-        name: verification.label,
-        durationMs: 0,
-        error: `Unexpected: ${e instanceof Error ? e.message : String(e)}`,
-        fallback: "該当検証の個別実行で原因調査",
-      };
-      allResults.push(errorResult);
-      console.log(`  [x] ${verification.label} — unexpected error`);
+    for (const r of results) {
+      console.log(`  [${statusIconChar(r.status)}] ${r.name} (${Math.round(r.durationMs)}ms)`);
     }
 
     console.log("");
+    return results;
+  } catch (e) {
+    const errorResult: VerifyResult = {
+      status: "fail",
+      name: entry.label,
+      durationMs: 0,
+      error: `Unexpected: ${e instanceof Error ? e.message : String(e)}`,
+      fallback: "該当検証の個別実行で原因調査",
+    };
+    console.log(`  [x] ${entry.label} — unexpected error`);
+    console.log("");
+    return [errorResult];
   }
+}
 
-  console.log("=== Results ===\n");
-
+function printResultsTable(results: readonly VerifyResult[]): void {
   const colWidths = { status: 13, name: 30, duration: 10 };
   const header = `${"Status".padEnd(colWidths.status)} ${"Name".padEnd(colWidths.name)} ${"Duration".padEnd(colWidths.duration)} Detail`;
   const separator = "-".repeat(header.length + 20);
@@ -139,24 +153,28 @@ async function main(): Promise<void> {
   console.log(header);
   console.log(separator);
 
-  for (const r of allResults) {
+  for (const r of results) {
     const status = statusIcon(r.status).padEnd(colWidths.status);
     const name = r.name.padEnd(colWidths.name);
     const duration = `${Math.round(r.durationMs)}ms`.padEnd(colWidths.duration);
-    switch (r.status) {
-      case "pass":
-        console.log(`${status} ${name} ${duration} ${r.detail.slice(0, 80)}`);
-        break;
-      case "fail":
-        console.log(`${status} ${name} ${duration} ${r.error.slice(0, 80)}`);
-        break;
-      case "inconclusive":
-        console.log(`${status} ${name} ${duration} ${r.reason.slice(0, 80)}`);
-        break;
-    }
+    console.log(`${status} ${name} ${duration} ${resultDetailText(r).slice(0, 80)}`);
   }
 
   console.log("");
+}
+
+async function main(): Promise<void> {
+  console.log("=== DCC-03 Verification ===\n");
+
+  const allResults: VerifyResult[] = [];
+
+  for (const verification of verifications) {
+    const results = await runVerification(verification);
+    allResults.push(...results);
+  }
+
+  console.log("=== Results ===\n");
+  printResultsTable(allResults);
 
   const report = generateReport(allResults);
   await writeFile("verify-report.md", report, "utf-8");
@@ -169,7 +187,6 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 }
-
 
 //コア機能検証
 main();

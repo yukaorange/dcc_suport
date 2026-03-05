@@ -642,7 +642,7 @@ adobe-coach/
   "engine": "claude",
   "interval": 5,
   "threshold": 5,
-  "maxImageWidth": 1280,
+  "maxImageWidthPx": 1280,
   "notification": "terminal",
   "dashboard": {
     "enabled": true,

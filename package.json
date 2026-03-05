@@ -8,13 +8,15 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
+    "test": "vitest run",
     "check": "bun run typecheck && biome ci .",
     "verify": "bun run src/verify/run-all.ts",
     "verify:streaming": "bun run src/verify/verify-streaming.ts",
     "verify:image": "bun run src/verify/verify-image.ts",
     "verify:session": "bun run src/verify/verify-session.ts",
     "verify:agents": "bun run src/verify/verify-agents.ts",
-    "verify:prompt": "bun run src/verify/verify-system-prompt.ts"
+    "verify:prompt": "bun run src/verify/verify-system-prompt.ts",
+    "verify:capture-diff": "bun run src/verify/verify-capture-diff.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.63",
@@ -25,6 +27,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.5",
     "@types/bun": "latest",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vitest": "^4.0.18"
   }
 }

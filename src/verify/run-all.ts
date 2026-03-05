@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import type { VerifyResult } from "./types";
 import { verifyAgents } from "./verify-agents";
+import { verifyCaptureDiff } from "./verify-capture-diff";
 import { verifyImage } from "./verify-image";
 import { verifySession } from "./verify-session";
 import { verifyStreaming } from "./verify-streaming";
@@ -17,6 +18,7 @@ const verifications: readonly VerifyEntry[] = [
   { label: "Session Continuity", run: verifySession },
   { label: "Agents (Subagent)", run: verifyAgents },
   { label: "System Prompt Append", run: verifySystemPrompt },
+  { label: "Capture + Diff", run: verifyCaptureDiff },
 ];
 
 function statusIcon(status: string): string {

@@ -9,6 +9,8 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:watch": "vitest",
     "check": "bun run typecheck && biome ci .",
     "verify": "bun run src/verify/run-all.ts",
     "verify:streaming": "bun run src/verify/verify-streaming.ts",
@@ -16,7 +18,8 @@
     "verify:session": "bun run src/verify/verify-session.ts",
     "verify:agents": "bun run src/verify/verify-agents.ts",
     "verify:prompt": "bun run src/verify/verify-system-prompt.ts",
-    "verify:capture-diff": "bun run src/verify/verify-capture-diff.ts"
+    "verify:capture-diff": "bun run src/verify/verify-capture-diff.ts",
+    "verify:coach-loop": "bun run src/verify/verify-coach-loop.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.63",

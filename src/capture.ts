@@ -33,7 +33,6 @@ function toErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-// functional core: Buffer → CapturedImage 変換（副作用なし）
 export async function buildCapturedImage(
   pngBuffer: Buffer,
   maxWidthPx: number,
@@ -59,7 +58,6 @@ export async function buildCapturedImage(
   };
 }
 
-// mutable shell: 副作用（OS スクリーンショット）を Result 型に変換
 export async function captureScreen(config: CaptureConfig): Promise<CaptureResult> {
   const screenshotBuffer = await screenshot({ format: "png" }).catch((e: unknown) => e);
   if (!(screenshotBuffer instanceof Buffer)) {

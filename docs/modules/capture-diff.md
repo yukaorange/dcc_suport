@@ -74,7 +74,7 @@ flowchart TD
 | 名前 | 範囲 | 意味 | 使用箇所 |
 |------|------|------|----------|
 | `pixelmatchThreshold` | 0.0 - 1.0 | ピクセル単位の色差感度。「2つのピクセルの色がどれくらい違ったら '違う' とみなすか」 | diff.ts が pixelmatch に渡す |
-| `diffThresholdPercent` | 例: 5% | 画面全体の変化率の閾値。「画面の何%が変わったら AI に送信するか」 | coach-loop (DCC-06) が判定する |
+| `diffThresholdPercent` | 例: 5% | 画面全体の変化率の閾値。「画面の何%が変わったら AI に送信するか」 | coach-loopが判定 |
 
 ## 型の関係
 
@@ -87,8 +87,8 @@ graph LR
   end
 
   subgraph diff ["diff.ts"]
-    DI["DiffInput<br/>- currentPixels<br/>- currentWidthPx<br/>- currentHeightPx<br/>- previousPixels<br/>- previousWidthPx<br/>- previousHeightPx<br/>- pixelmatchThreshold"]
-    DR["DiffResult<br/>{ isOk: true/false }"]
+    DI["DiffInput"]
+    DR["DiffResult"]
     DI --> DR
   end
 

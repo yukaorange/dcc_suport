@@ -1,0 +1,14 @@
+# markdownlint config (common baseline for docs-heavy repos)
+default: true
+
+# Long lines are often acceptable in docs with links/table rows.
+MD013: false
+
+# Allow inline HTML when needed (e.g. details/summary tags).
+MD033: false
+
+# Do not require top-level heading on every markdown file.
+MD041: false
+
+# Keep this disabled as requested.
+MD060: false

@@ -8,4 +8,5 @@ sessions/
 .env.*
 verify-report.md
 src/verify/tmp/
-# .claude/
+.coach-tmp/
+.claude/

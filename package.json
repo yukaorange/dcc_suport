@@ -9,6 +9,8 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:watch": "vitest",
     "check": "bun run typecheck && biome ci .",
     "verify": "bun run src/verify/run-all.ts",
     "verify:streaming": "bun run src/verify/verify-streaming.ts",

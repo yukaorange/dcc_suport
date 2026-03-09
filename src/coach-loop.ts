@@ -1,5 +1,6 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type CapturedImage, captureScreen } from "./capture";
 import type { CoachConfig } from "./config";
 import { computeDiff } from "./diff";
@@ -79,7 +80,7 @@ const INITIAL_STATE: LoopState = {
 
 const SILENT_MARKER = "__SILENT__";
 
-const TEMP_DIR = join(import.meta.dir, "..", ".coach-tmp");
+const TEMP_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".coach-tmp");
 const SCREENSHOT_PATH = join(TEMP_DIR, "current.png");
 
 type DiffCheckResult =
@@ -154,7 +155,7 @@ async function saveScreenshot(pngBuffer: Buffer): Promise<string> {
 
 async function cleanupTemp(): Promise<void> {
   // @throws — ファイルが存在しない場合のエラーは無視
-  await unlink(SCREENSHOT_PATH).catch(() => { });
+  await unlink(SCREENSHOT_PATH).catch(() => {});
 }
 
 // 次のラウンドまで待機する。以下の3つのうち最初に起きたもので起きる:

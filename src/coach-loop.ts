@@ -256,13 +256,16 @@ async function executeOneRound(
     allowedTools: [],
     maxTurns: 3,
     timeoutMs: 60_000,
+    signal: options.signal,
   });
 
   if (!engineResult.isOk) {
-    onEvent({
-      kind: "engine_error",
-      message: `[${engineResult.errorCode}] ${engineResult.message}`,
-    });
+    if (engineResult.errorCode !== "ABORTED") {
+      onEvent({
+        kind: "engine_error",
+        message: `[${engineResult.errorCode}] ${engineResult.message}`,
+      });
+    }
     return deriveNextState(state, currentImage, engineResult);
   }
 

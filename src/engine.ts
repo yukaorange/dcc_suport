@@ -6,7 +6,7 @@ import {
 
 export type { AgentDefinition } from "@anthropic-ai/claude-agent-sdk";
 
-type EngineErrorCode = "TIMEOUT" | "SDK_ERROR" | "EMPTY_RESULT";
+type EngineErrorCode = "TIMEOUT" | "ABORTED" | "SDK_ERROR" | "EMPTY_RESULT";
 
 type EngineSuccess = {
   readonly isOk: true;
@@ -37,6 +37,7 @@ export type InvokeClaudeOptions = {
   readonly permissionMode?: PermissionMode;
   readonly maxTurns?: number;
   readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
 };
 
 let activeQueryStartedAt: number | null = null;
@@ -105,6 +106,30 @@ function extractFromMessage(message: unknown): MessageExtract {
   return { sessionId, resultText };
 }
 
+function classifyAbortReason(
+  externalSignal: AbortSignal | undefined,
+  internalSignal: AbortSignal,
+  timeoutMs: number,
+): EngineFailure | null {
+  if (externalSignal?.aborted) {
+    return {
+      isOk: false,
+      errorCode: "ABORTED",
+      message: "Query aborted by external signal",
+    };
+  }
+
+  if (internalSignal.aborted) {
+    return {
+      isOk: false,
+      errorCode: "TIMEOUT",
+      message: `Query timed out after ${timeoutMs}ms`,
+    };
+  }
+
+  return null;
+}
+
 function buildQueryOptions(options: InvokeClaudeOptions): SDKOptions {
   const queryOptions: SDKOptions = {};
 
@@ -146,40 +171,35 @@ function buildQueryOptions(options: InvokeClaudeOptions): SDKOptions {
   return queryOptions;
 }
 
-export async function invokeClaude(options: InvokeClaudeOptions): Promise<EngineResult> {
-  const timeoutMs = Math.min(options.timeoutMs ?? 60_000, MAX_TIMEOUT_MS);
-  const queryOptions = buildQueryOptions(options);
+type StreamResult = {
+  readonly rawMessages: unknown[];
+  readonly sessionId: string | undefined;
+  readonly resultText: string | undefined;
+  readonly error: unknown | null;
+};
 
-  const queryStartTimeOrLockError = acquireQueryLock(timeoutMs);
-  if (typeof queryStartTimeOrLockError !== "number") return queryStartTimeOrLockError;
-  const myStartTime = queryStartTimeOrLockError;
-
-  // SDK は AbortController による "stop and clean up" を保証しているため、ソフトタイムアウトのみで運用する
-  // もし SDK が abort を無視するケースが観測された場合は、close() + Promise.race によるハードタイムアウトの導入を検討すること
-  const abortController = new AbortController();
-  const timer = setTimeout(() => abortController.abort(), timeoutMs);
-
-  // ストリーミングメッセージを逐次受信し、sessionId と最終結果テキストを抽出する
+// queryStream のデータフロー:
+//
+//   engine.ts          SDK (query)         claude CLI         Anthropic API
+//   ─────────          ───────────         ──────────         ─────────────
+//   for await ◄─ yield ◄─ for await ◄─ stdout ◄─── streaming response
+//       │                     │
+//       │  next()             │  next()
+//       ▼                     ▼
+//   message を処理      chunk を yield
+async function consumeQueryStream(
+  prompt: string,
+  queryOptions: SDKOptions,
+  abortController: AbortController,
+): Promise<StreamResult> {
   const rawMessages: unknown[] = [];
   let sessionId: string | undefined;
   let resultText: string | undefined;
 
   try {
-    // queryStream のデータフロー:
-    //
-    //   engine.ts          SDK (query)         claude CLI         Anthropic API
-    //   ─────────          ───────────         ──────────         ─────────────
-    //   for await ◄─ yield ◄─ for await ◄─ stdout ◄─── streaming response
-    //       │                     │
-    //       │  next()             │  next()
-    //       ▼                     ▼
-    //   message を処理      chunk を yield
     const queryStream = query({
-      prompt: options.prompt,
-      options: {
-        ...queryOptions,
-        abortController,
-      },
+      prompt,
+      options: { ...queryOptions, abortController },
     });
 
     for await (const message of queryStream) {
@@ -189,40 +209,58 @@ export async function invokeClaude(options: InvokeClaudeOptions): Promise<Engine
       if (extracted.resultText) resultText = extracted.resultText;
     }
   } catch (e) {
-    clearTimeout(timer);
+    return { rawMessages, sessionId, resultText, error: e };
+  }
 
-    if (abortController.signal.aborted) {
-      return {
-        isOk: false,
-        errorCode: "TIMEOUT",
-        message: `Query timed out after ${timeoutMs}ms`,
-      };
-    }
+  return { rawMessages, sessionId, resultText, error: null };
+}
 
+export async function invokeClaude(options: InvokeClaudeOptions): Promise<EngineResult> {
+  const timeoutMs = Math.min(options.timeoutMs ?? 60_000, MAX_TIMEOUT_MS);
+  const queryOptions = buildQueryOptions(options);
+
+  const queryStartTimeOrLockError = acquireQueryLock(timeoutMs);
+  if (typeof queryStartTimeOrLockError !== "number") return queryStartTimeOrLockError;
+  const myStartTime = queryStartTimeOrLockError;
+
+  if (options.signal?.aborted) {
+    releaseQueryLock(myStartTime);
+    return { isOk: false, errorCode: "ABORTED", message: "Aborted before query started" };
+  }
+
+  const abortController = new AbortController();
+  const timer = setTimeout(() => abortController.abort(), timeoutMs);
+
+  const onExternalAbort = () => abortController.abort();
+  options.signal?.addEventListener("abort", onExternalAbort, { once: true });
+
+  const stream = await consumeQueryStream(options.prompt, queryOptions, abortController).finally(
+    () => releaseQueryLock(myStartTime),
+  );
+
+  clearTimeout(timer);
+  options.signal?.removeEventListener("abort", onExternalAbort);
+
+  const abortResult = classifyAbortReason(options.signal, abortController.signal, timeoutMs);
+  if (abortResult) return abortResult;
+
+  if (stream.error !== null) {
     return {
       isOk: false,
       errorCode: "SDK_ERROR",
-      message: e instanceof Error ? e.message : String(e),
+      message: stream.error instanceof Error ? stream.error.message : String(stream.error),
     };
-  } finally {
-    releaseQueryLock(myStartTime);
   }
 
-  clearTimeout(timer);
-
-  if (resultText === undefined || resultText.trim().length === 0) {
-    return {
-      isOk: false,
-      errorCode: "EMPTY_RESULT",
-      message: "SDK returned no result",
-    };
+  if (stream.resultText === undefined || stream.resultText.trim().length === 0) {
+    return { isOk: false, errorCode: "EMPTY_RESULT", message: "SDK returned no result" };
   }
 
   return {
     isOk: true,
-    result: resultText,
-    sessionId,
-    rawMessages,
+    result: stream.resultText,
+    sessionId: stream.sessionId,
+    rawMessages: stream.rawMessages,
   };
 }
 

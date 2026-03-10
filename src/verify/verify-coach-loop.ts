@@ -41,6 +41,8 @@ export async function verifyCoachLoop(): Promise<VerifyResult> {
       config: { ...defaultConfig, intervalSeconds: 2 },
       signal: abortController.signal,
       onEvent,
+      referenceImagePath: null,
+      plan: null,
     });
     await loopFinished;
   } catch (e) {

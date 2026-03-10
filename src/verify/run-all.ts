@@ -53,7 +53,7 @@ function generateReport(results: readonly VerifyResult[]): string {
   const inconclusiveCount = results.filter((r) => r.status === "inconclusive").length;
 
   const lines: string[] = [
-    `# DCC-03 Verification Report`,
+    `# DCC Support Verification Report`,
     ``,
     `Generated: ${now}`,
     ``,

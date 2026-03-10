@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import type { LoopEvent } from "../src/coach-loop";
 import { startCoachLoop } from "../src/coach-loop";
 import { defaultConfig } from "../src/config";
+import type { Plan } from "../src/planner";
 
 const { captureScreen } = vi.hoisted(() => ({
 	captureScreen: vi.fn(),
@@ -55,6 +56,8 @@ function runLoop(abortController: AbortController, onEvent: (e: LoopEvent) => vo
 		config: { ...defaultConfig, intervalSeconds: 0 },
 		signal: abortController.signal,
 		onEvent,
+		referenceImagePath: null,
+		plan: null,
 	});
 }
 
@@ -158,6 +161,8 @@ describe("startCoachLoop", () => {
 			config: { ...defaultConfig, intervalSeconds: 0 },
 			signal: abortController.signal,
 			onEvent: (e) => events.push(e),
+			referenceImagePath: null,
+			plan: null,
 		});
 
 		await loopFinished;
@@ -165,6 +170,46 @@ describe("startCoachLoop", () => {
 		expect(invokeClaude).toHaveBeenCalledWith(
 			expect.objectContaining({ signal: abortController.signal }),
 		);
+	});
+
+	test("referenceImagePathとplanがinvokeClaudeのpromptとappendSystemPromptに反映される", async () => {
+		invokeClaude.mockClear();
+
+		const plan: Plan = {
+			goal: "テスト用ゴール",
+			referenceSummary: "テスト分析結果",
+			steps: [
+				{ index: 1, application: "Illustrator", description: "ベクター作成", status: "pending" },
+			],
+		};
+
+		captureScreen.mockResolvedValue({ isOk: true, image: FAKE_IMAGE });
+		invokeClaude.mockResolvedValue({
+			isOk: true,
+			result: "アドバイスです",
+			sessionId: "ref-session",
+			rawMessages: [],
+		});
+		checkSessionContinuity.mockReturnValue({ continuable: true });
+
+		const { abortController, onEvent } = collectEvents("advice");
+
+		const { loopFinished } = startCoachLoop({
+			config: { ...defaultConfig, intervalSeconds: 0 },
+			signal: abortController.signal,
+			onEvent,
+			referenceImagePath: "/tmp/ref.png",
+			plan,
+		});
+		await loopFinished;
+
+		const call = invokeClaude.mock.calls[0][0];
+		expect(call.prompt).toContain("/tmp/ref.png");
+		expect(call.prompt).toContain("制作プランが設定されています");
+		expect(call.appendSystemPrompt).toContain("リファレンス画像");
+		expect(call.appendSystemPrompt).toContain("/tmp/ref.png");
+		expect(call.appendSystemPrompt).toContain("テスト用ゴール");
+		expect(call.appendSystemPrompt).toContain("[Illustrator] ベクター作成");
 	});
 
 	test("ABORTED応答時はengine_errorイベントが発火しない", async () => {
@@ -187,6 +232,8 @@ describe("startCoachLoop", () => {
 					abortController.abort();
 				}
 			},
+			referenceImagePath: null,
+			plan: null,
 		});
 
 		await loopFinished;

@@ -63,7 +63,7 @@ STEP5のテスト実装後、codex にテストコードをレビューさせる
 codex を呼ぶときは timeout を延長すること。(7分以上を推奨)
 
 ```bash
-codex exec -m gpt-5.3-codex "このテストコードをレビューして。瑣末な点への不要なリプライはするな。致命的な点への指摘に尽力せよ。観点: (1)テストが実際に対象の振る舞いを検証できているか (2)エッジケースの見落とし (3)実装詳細への過度な依存(リファクタリング耐性) : $(git diff origin/main -- '**/tests/**') (ref: CLAUDE.md, .claude/rules/coderule.md, .claude/rules/convention.md)"
+codex exec -m gpt-5.4 "このテストコードをレビューして。瑣末な点への不要なリプライはするな。致命的な点への指摘に尽力せよ。観点: (1)テストが実際に対象の振る舞いを検証できているか (2)エッジケースの見落とし (3)実装詳細への過度な依存(リファクタリング耐性) : $(git diff origin/main -- '**/tests/**') (ref: CLAUDE.md, .claude/rules/coderule.md, .claude/rules/convention.md)"
 ```
 
 * codex の指摘があればユーザーに報告する。修正するかどうかはユーザーが判断する

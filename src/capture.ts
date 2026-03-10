@@ -3,6 +3,7 @@ import sharp from "sharp";
 
 type CaptureConfig = {
   readonly maxWidthPx: number;
+  readonly displayId?: string;
 };
 
 type CapturedImage = {
@@ -59,7 +60,9 @@ export async function buildCapturedImage(
 }
 
 export async function captureScreen(config: CaptureConfig): Promise<CaptureResult> {
-  const screenshotBuffer = await screenshot({ format: "png" }).catch((e: unknown) => e);
+  const screenshotBuffer = await screenshot({ format: "png", screen: config.displayId }).catch(
+    (e: unknown) => e,
+  );
   if (!(screenshotBuffer instanceof Buffer)) {
     return {
       isOk: false,

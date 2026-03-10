@@ -118,7 +118,7 @@ codex exec -m gpt-5.3-codex "このプランをレビューして。瑣末な点
 
 # updated plan review request
 # resume --last をつけないと最初のレビューのコンテキストを忘却されるので注意
-codex exec resume --last -m gpt-5.3-codex "プランを変更したからレビューして。瑣末な点への不要なリプライはするな。致命的な点への指摘に尽力せよ。: {plan_full_path} (ref: CLAUDE.md, .claude/rules/coderule.md, .claude/rules/convention.md)"
+codex exec resume --last -m gpt-5.4 "プランを変更したからレビューして。瑣末な点への不要なリプライはするな。致命的な点への指摘に尽力せよ。: {plan_full_path} (ref: CLAUDE.md, .claude/rules/coderule.md, .claude/rules/convention.md)"
 
 ```
 

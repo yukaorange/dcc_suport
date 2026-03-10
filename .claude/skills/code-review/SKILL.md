@@ -68,7 +68,7 @@ codex を呼ぶときは timeout を延長すること。(7分以上を推奨)
 
 ```bash
 # 修正後の diff を codex にレビューさせる
-codex exec -m gpt-5.3-codex "このdiffをレビューして。瑣末な点への不要なリプライはするな。致命的な点への指摘に尽力せよ。: $(git diff main --stat で対象ファイルを確認) (ref: CLAUDE.md, .claude/rules/coderule.md, .claude/rules/convention.md)"
+codex exec -m gpt-5.4 "このdiffをレビューして。瑣末な点への不要なリプライはするな。致命的な点への指摘に尽力せよ。: $(git diff main --stat で対象ファイルを確認) (ref: CLAUDE.md, .claude/rules/coderule.md, .claude/rules/convention.md)"
 ```
 
 - codex の指摘があればユーザーに報告する。修正するかどうかはユーザーが判断する

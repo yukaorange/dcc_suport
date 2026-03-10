@@ -139,4 +139,59 @@ describe("startCoachLoop", () => {
 		expect(events.some((e) => e.kind === "silent")).toBe(true);
 		expect(events.every((e) => e.kind !== "advice")).toBe(true);
 	});
+
+	test("abort signalがinvokeClaudeに伝播される", async () => {
+		const abortController = new AbortController();
+		const events: LoopEvent[] = [];
+
+		captureScreen.mockResolvedValue({ isOk: true, image: FAKE_IMAGE });
+		invokeClaude.mockImplementation(() => {
+			abortController.abort();
+			return Promise.resolve({
+				isOk: false,
+				errorCode: "ABORTED",
+				message: "Query aborted by external signal",
+			});
+		});
+
+		const { loopFinished } = startCoachLoop({
+			config: { ...defaultConfig, intervalSeconds: 0 },
+			signal: abortController.signal,
+			onEvent: (e) => events.push(e),
+		});
+
+		await loopFinished;
+
+		expect(invokeClaude).toHaveBeenCalledWith(
+			expect.objectContaining({ signal: abortController.signal }),
+		);
+	});
+
+	test("ABORTED応答時はengine_errorイベントが発火しない", async () => {
+		const abortController = new AbortController();
+		const events: LoopEvent[] = [];
+
+		captureScreen.mockResolvedValue({ isOk: true, image: FAKE_IMAGE });
+		invokeClaude.mockResolvedValue({
+			isOk: false,
+			errorCode: "ABORTED",
+			message: "Query aborted by external signal",
+		});
+
+		const { loopFinished } = startCoachLoop({
+			config: { ...defaultConfig, intervalSeconds: 0 },
+			signal: abortController.signal,
+			onEvent: (e) => {
+				events.push(e);
+				if (e.kind === "no_change") {
+					abortController.abort();
+				}
+			},
+		});
+
+		await loopFinished;
+
+		expect(events.some((e) => e.kind === "querying")).toBe(true);
+		expect(events.every((e) => e.kind !== "engine_error")).toBe(true);
+	});
 });

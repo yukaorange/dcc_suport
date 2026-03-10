@@ -11,6 +11,9 @@ process.on("SIGINT", () => {
   printLoopEvent({ kind: "stopped" });
   rl.close();
   abortController.abort();
+
+  // SDK が abort を無視した場合の安全弁
+  setTimeout(() => process.exit(1), 3_000).unref();
 });
 
 printLoopEvent({ kind: "started" });

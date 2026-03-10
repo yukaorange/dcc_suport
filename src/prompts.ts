@@ -1,13 +1,22 @@
+import type { Plan } from "./planner";
+
+type CoachSystemPromptInput = {
+  readonly referenceImagePath: string | null;
+  readonly plan: Plan | null;
+};
+
 type CoachPromptInput = {
   readonly screenshotPath: string;
   readonly isFirstRound: boolean;
   readonly userMessage: string | null;
+  readonly referenceImagePath: string | null;
+  readonly plan: Plan | null;
 };
 
-export type { CoachPromptInput };
+export type { CoachPromptInput, CoachSystemPromptInput };
 
-export function buildCoachSystemPrompt(): string {
-  return `あなたはDCCツール（Adobe Illustrator / Photoshop / After Effects 、Blender 、 Unreal Engine 、etc.）の制作コーチです。
+export function buildCoachSystemPrompt(input: CoachSystemPromptInput): string {
+  const basePrompt = `あなたはDCCツール（Adobe Illustrator / Photoshop / After Effects 、Blender 、 Unreal Engine 、etc.）の制作コーチです。
 
 ## 役割
 ユーザーの作業画面のスクリーンショットを見て、制作の方向性についてアドバイスします。
@@ -45,13 +54,61 @@ AIは一切操作に介入しません。横で見ていて、必要な作業に
 - 長文で語りすぎない。先輩が隣で一言かけるくらいの分量。
 - 「〜してください」より「〜という方法があります。」のような決めつけない自由な発想を促す口調。
 - Adobe CCのメニュー名は日本語UIを前提にするが、アドバイス時には「ブラー（gausian blur）」のように英字版GUIでの表現も併記すること。`;
+
+  const sections: string[] = [basePrompt];
+
+  if (input.referenceImagePath !== null) {
+    sections.push(`
+## リファレンス画像
+リファレンス画像のパス: ${input.referenceImagePath}
+この画像はユーザーが目指す方向性の参考として提供されたものです。完コピしたいわけではない。表現技法や空気感、色彩に焦点をあててプロのグラフィックデザイナーのように構成を解剖していくような目線で分析してください。`);
+  }
+
+  if (input.plan !== null) {
+    const stepsText = input.plan.steps
+      .map((s) => {
+        const statusMark =
+          s.status === "completed"
+            ? "[完了]"
+            : s.status === "in_progress"
+              ? "[作業中]"
+              : "[未着手]";
+        return `  ${s.index}. ${statusMark} [${s.application}] ${s.description}`;
+      })
+      .join("\n");
+
+    sections.push(`
+## 制作プラン
+目標: ${input.plan.goal}
+リファレンス分析: ${input.plan.referenceSummary}
+
+ステップ:
+${stepsText}
+
+プランに基づいてアドバイスしてください。ステップの進捗が確認できたら、その旨を伝えてください。`);
+  }
+
+  return sections.join("\n");
 }
 
 export function buildCoachUserPrompt(input: CoachPromptInput): string {
   const screenshotLine = `現在の作業画面: ${input.screenshotPath}`;
 
   if (input.isFirstRound) {
-    const base = `これはセッション開始後の最初のスクリーンショットです。ユーザーが何をしようとしているか観察してください。\n\n${screenshotLine}`;
+    const parts: string[] = ["これはセッション開始後の最初のスクリーンショットです。"];
+
+    if (input.referenceImagePath !== null) {
+      parts.push(`リファレンス画像: ${input.referenceImagePath}`);
+    }
+    if (input.plan !== null) {
+      parts.push(
+        "制作プランが設定されています。プランの最初のステップに基づいてアドバイスの準備をしてください。",
+      );
+    }
+
+    parts.push(screenshotLine);
+
+    const base = parts.join("\n\n");
     return input.userMessage !== null
       ? `${base}\n\nユーザーからのメッセージ:\n${input.userMessage}`
       : base;

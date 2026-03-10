@@ -5,6 +5,7 @@ import { type CapturedImage, captureScreen } from "./capture";
 import type { CoachConfig } from "./config";
 import { computeDiff } from "./diff";
 import { checkSessionContinuity, type EngineResult, invokeClaude } from "./engine";
+import type { Plan, PlanStepStatus } from "./planner";
 import { buildCoachSystemPrompt, buildCoachUserPrompt } from "./prompts";
 
 type CoachAdvice = {
@@ -24,6 +25,11 @@ type LoopEvent =
   | { readonly kind: "silent" }
   | { readonly kind: "engine_error"; readonly message: string }
   | { readonly kind: "session_lost"; readonly reason: string }
+  | {
+      readonly kind: "plan_step_updated";
+      readonly stepIndex: number;
+      readonly newStatus: PlanStepStatus;
+    }
   | { readonly kind: "stopped" };
 
 export type { LoopEvent, CoachAdvice };
@@ -57,6 +63,9 @@ type CoachLoopOptions = {
   readonly config: CoachConfig;
   readonly signal: AbortSignal;
   readonly onEvent: (event: LoopEvent) => void;
+  readonly displayId?: string;
+  readonly referenceImagePath: string | null;
+  readonly plan: Plan | null;
 };
 
 type CoachLoopHandle = {
@@ -70,12 +79,7 @@ type LoopState = {
   readonly previousImage: CapturedImage | null;
   readonly sessionId: string | undefined;
   readonly roundIndex: number;
-};
-
-const INITIAL_STATE: LoopState = {
-  previousImage: null,
-  sessionId: undefined,
-  roundIndex: 0,
+  readonly plan: Plan | null;
 };
 
 const SILENT_MARKER = "__SILENT__";
@@ -141,6 +145,7 @@ function deriveNextState(
     previousImage: newImage,
     sessionId,
     roundIndex: current.roundIndex + 1,
+    plan: current.plan,
   };
 }
 
@@ -221,6 +226,7 @@ async function executeOneRound(
   // @throws — OS レベルのキャプチャ失敗
   const captureResult = await captureScreen({
     maxWidthPx: config.maxImageWidthPx,
+    displayId: options.displayId,
   });
   if (!captureResult.isOk) {
     onEvent({
@@ -249,9 +255,18 @@ async function executeOneRound(
 
   // @throws — SDK レベルのエラー
   const engineResult = await invokeClaude({
-    prompt: buildCoachUserPrompt({ screenshotPath, isFirstRound, userMessage }),
+    prompt: buildCoachUserPrompt({
+      screenshotPath,
+      isFirstRound,
+      userMessage,
+      referenceImagePath: options.referenceImagePath,
+      plan: state.plan,
+    }),
     sessionId: state.sessionId,
-    appendSystemPrompt: buildCoachSystemPrompt(),
+    appendSystemPrompt: buildCoachSystemPrompt({
+      referenceImagePath: options.referenceImagePath,
+      plan: state.plan,
+    }),
     permissionMode: "bypassPermissions",
     allowedTools: [],
     maxTurns: 3,
@@ -276,6 +291,7 @@ async function executeOneRound(
       previousImage: currentImage,
       sessionId: undefined,
       roundIndex: state.roundIndex + 1,
+      plan: state.plan,
     };
   }
 
@@ -302,7 +318,12 @@ export function startCoachLoop(options: CoachLoopOptions): CoachLoopHandle {
   const loopFinished = (async () => {
     await ensureTempDir();
 
-    let state: LoopState = INITIAL_STATE;
+    let state: LoopState = {
+      previousImage: null,
+      sessionId: undefined,
+      roundIndex: 0,
+      plan: options.plan,
+    };
 
     try {
       while (!options.signal.aborted) {

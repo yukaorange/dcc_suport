@@ -133,6 +133,7 @@ function parseAdvice(result: string): string | null {
 }
 
 function deriveNextState(
+  //次のラウンドへ導く
   current: LoopState,
   newImage: CapturedImage,
   engineResult: EngineResult | null,
@@ -296,6 +297,7 @@ async function executeOneRound(
   }
 
   const advice = parseAdvice(engineResult.result);
+
   if (advice === null) {
     onEvent({ kind: "silent" });
   } else {

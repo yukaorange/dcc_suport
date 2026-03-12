@@ -28,7 +28,6 @@ describe("loadConfig", () => {
 		expect(result.isOk).toBe(true);
 		if (!result.isOk) return;
 		expect(result.config.intervalSeconds).toBe(10);
-		expect(result.config.engine).toBe("claude");
 		expect(result.config.diffThresholdPercent).toBe(5);
 	});
 
@@ -46,12 +45,11 @@ describe("loadConfig", () => {
 		expect(result.config.diffThresholdPercent).toBe(20);
 	});
 
-	test("ネストされた設定（dashboard, claude）がマージされる", async () => {
+	test("ネストされた設定（claude）がマージされる", async () => {
 		const path = await writeJson(
 			"nested.json",
 			JSON.stringify({
-				dashboard: { enabled: false, port: 4000 },
-				claude: { mcpConfig: "/tmp/mcp.json", useSubagents: false },
+				claude: { mcpConfig: "/tmp/mcp.json" },
 			}),
 		);
 
@@ -59,11 +57,7 @@ describe("loadConfig", () => {
 
 		expect(result.isOk).toBe(true);
 		if (!result.isOk) return;
-		expect(result.config.dashboard.isEnabled).toBe(false);
-		expect(result.config.dashboard.port).toBe(4000);
 		expect(result.config.claude.mcpConfigPath).toBe("/tmp/mcp.json");
-		expect(result.config.claude.isSubagentsEnabled).toBe(false);
-		expect(result.config.claude.isSystemPromptAppendEnabled).toBe(true);
 	});
 
 	test("不正な型の値はデフォルト値にフォールバックする", async () => {
@@ -119,14 +113,4 @@ describe("loadConfig", () => {
 		expect(result.message).toContain("intervalSeconds");
 	});
 
-	test("dashboard.portが範囲外の場合はVALIDATION_FAILEDを返す", async () => {
-		const path = await writeJson("bad-port.json", JSON.stringify({ dashboard: { port: 80 } }));
-
-		const result = await loadConfig(path);
-
-		expect(result.isOk).toBe(false);
-		if (result.isOk) return;
-		expect(result.errorCode).toBe("VALIDATION_FAILED");
-		expect(result.message).toContain("dashboard.port");
-	});
 });

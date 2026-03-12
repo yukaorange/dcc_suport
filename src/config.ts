@@ -3,41 +3,25 @@ import { resolve } from "node:path";
 
 type ClaudeConfig = {
   readonly mcpConfigPath: string | null;
-  readonly isSystemPromptAppendEnabled: boolean;
-  readonly isSubagentsEnabled: boolean;
-};
-
-type DashboardConfig = {
-  readonly isEnabled: boolean;
-  readonly port: number;
 };
 
 export type CoachConfig = {
-  readonly engine: "claude";
   readonly intervalSeconds: number;
   readonly diffThresholdPercent: number;
   readonly maxImageWidthPx: number;
   readonly pixelmatchThreshold: number;
   readonly notification: "terminal" | "os" | "both";
-  readonly dashboard: DashboardConfig;
   readonly claude: ClaudeConfig;
 };
 
 export const defaultConfig: CoachConfig = {
-  engine: "claude",
   intervalSeconds: 5,
   diffThresholdPercent: 5,
   maxImageWidthPx: 1280,
   pixelmatchThreshold: 0.1,
   notification: "terminal",
-  dashboard: {
-    isEnabled: true,
-    port: 3456,
-  },
   claude: {
     mcpConfigPath: null,
-    isSystemPromptAppendEnabled: true,
-    isSubagentsEnabled: true,
   },
 };
 
@@ -62,11 +46,9 @@ function toFiniteNumber(value: unknown, fallback: number): number {
 }
 
 function deepMerge(base: CoachConfig, partial: Record<string, unknown>): CoachConfig {
-  const dashboard = isPlainObject(partial.dashboard) ? partial.dashboard : {};
   const claude = isPlainObject(partial.claude) ? partial.claude : {};
 
   return {
-    engine: "claude",
     intervalSeconds: toFiniteNumber(partial.interval, base.intervalSeconds),
     diffThresholdPercent: toFiniteNumber(partial.threshold, base.diffThresholdPercent),
     maxImageWidthPx: toFiniteNumber(partial.maxImageWidthPx, base.maxImageWidthPx),
@@ -77,22 +59,9 @@ function deepMerge(base: CoachConfig, partial: Record<string, unknown>): CoachCo
       partial.notification === "both"
         ? partial.notification
         : base.notification,
-    dashboard: {
-      isEnabled:
-        typeof dashboard.enabled === "boolean" ? dashboard.enabled : base.dashboard.isEnabled,
-      port: toFiniteNumber(dashboard.port, base.dashboard.port),
-    },
     claude: {
       mcpConfigPath:
         typeof claude.mcpConfig === "string" ? claude.mcpConfig : base.claude.mcpConfigPath,
-      isSystemPromptAppendEnabled:
-        typeof claude.systemPromptAppend === "boolean"
-          ? claude.systemPromptAppend
-          : base.claude.isSystemPromptAppendEnabled,
-      isSubagentsEnabled:
-        typeof claude.useSubagents === "boolean"
-          ? claude.useSubagents
-          : base.claude.isSubagentsEnabled,
     },
   };
 }
@@ -109,9 +78,6 @@ function validateConfig(config: CoachConfig): string | null {
   }
   if (config.pixelmatchThreshold < 0 || config.pixelmatchThreshold > 1) {
     return `pixelmatchThreshold must be 0-1, got ${config.pixelmatchThreshold}`;
-  }
-  if (config.dashboard.port < 1024 || config.dashboard.port > 65535) {
-    return `dashboard.port must be 1024-65535, got ${config.dashboard.port}`;
   }
   return null;
 }

@@ -1,10 +1,11 @@
 import {
   type AgentDefinition,
+  type CanUseTool,
   query,
   type Options as SDKOptions,
 } from "@anthropic-ai/claude-agent-sdk";
 
-export type { AgentDefinition } from "@anthropic-ai/claude-agent-sdk";
+export type { AgentDefinition, CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 
 type EngineErrorCode = "TIMEOUT" | "ABORTED" | "SDK_ERROR" | "EMPTY_RESULT";
 
@@ -23,8 +24,6 @@ type EngineFailure = {
 
 export type EngineResult = EngineSuccess | EngineFailure;
 
-type PermissionMode = "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk";
-
 const MAX_TIMEOUT_MS = 300_000;
 
 export type InvokeClaudeOptions = {
@@ -32,9 +31,9 @@ export type InvokeClaudeOptions = {
   readonly sessionId?: string;
   readonly appendSystemPrompt?: string;
   readonly agents?: Record<string, AgentDefinition>;
-  readonly allowedTools?: readonly string[];
+  readonly tools?: readonly string[];
+  readonly canUseTool?: CanUseTool;
   readonly model?: string;
-  readonly permissionMode?: PermissionMode;
   readonly maxTurns?: number;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
@@ -149,19 +148,16 @@ function buildQueryOptions(options: InvokeClaudeOptions): SDKOptions {
     queryOptions.agents = options.agents;
   }
 
-  if (options.allowedTools) {
-    queryOptions.allowedTools = [...options.allowedTools];
+  if (options.tools) {
+    queryOptions.tools = [...options.tools];
+  }
+
+  if (options.canUseTool) {
+    queryOptions.canUseTool = options.canUseTool;
   }
 
   if (options.model) {
     queryOptions.model = options.model;
-  }
-
-  if (options.permissionMode) {
-    queryOptions.permissionMode = options.permissionMode;
-    if (options.permissionMode === "bypassPermissions") {
-      queryOptions.allowDangerouslySkipPermissions = true;
-    }
   }
 
   if (options.maxTurns) {

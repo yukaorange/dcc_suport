@@ -45,7 +45,7 @@ flowchart TD
     StartLoop --> Capture
 
     subgraph subagents ["サブエージェント（DCC-7）"]:::dcc7box
-        Coach["coach<br>方向性判断・GUI案内"]:::dcc7
+        Coach["advisor<br>方向性判断・GUI案内"]:::dcc7
         Researcher["researcher<br>多段探索・知識蓄積"]:::dcc7
     end
 
@@ -82,7 +82,7 @@ flowchart LR
     end
 
     subgraph dcc7 ["DCC-7 新規"]
-        skills["skills.ts<br>─────────────<br>buildSkillManifest()<br>loadSkillManifest()<br>createResearcherPermissionGuard()"]:::new
+        skills["skills.ts<br>─────────────<br>buildSkillManifest()<br>loadSkillManifest()<br>createToolPermissionGuard()"]:::new
         agents["agents.ts<br>─────────────<br>buildAgentDefinitions()"]:::new
         gemini["gemini.ts<br>─────────────<br>extractVideoContent()"]:::new
         extractVideo["extract-video.ts<br>─────────────<br>CLIエントリポイント"]:::new
@@ -109,6 +109,26 @@ flowchart LR
 
     classDef new fill:#e8eaf6,stroke:#5c6bc0
 ```
+
+### テストカバレッジ
+
+| モジュール | テスト | ファイル / 理由 |
+|-----------|--------|----------------|
+| config.ts | あり | test/config.test.ts |
+| setup-flow.ts | あり | test/setup-flow.test.ts |
+| list-displays.ts | なし | OS依存の副作用のみ（screenshot-desktop のラッパー） |
+| planner.ts | あり | test/planner.test.ts |
+| coach-loop.ts | あり | test/coach-loop.test.ts（統合テスト、モック使用） |
+| capture.ts | あり | test/capture.test.ts |
+| diff.ts | あり | test/diff.test.ts |
+| prompts.ts | あり | test/prompts.test.ts |
+| engine.ts | なし | Claude Agent SDK の薄いラッパー。振る舞いは verify/ で手動検証 |
+| output.ts | なし | 純粋な表示ロジック（console.log のみの副作用） |
+| skills.ts | あり | test/skills.test.ts |
+| agents.ts | あり | test/agents.test.ts |
+| gemini.ts | あり | test/gemini.test.ts（APIキー未設定・URL不正の異常系のみ） |
+| extract-video.ts | なし | CLIエントリポイント（gemini.ts を呼ぶだけ） |
+| index.ts | なし | エントリポイント（各モジュールの組み合わせのみ） |
 
 ## データフロー: セットアップからコーチングまで
 
@@ -342,34 +362,177 @@ sequenceDiagram
     Process->>Process: プロセス終了
 ```
 
-## サブエージェント構成（DCC-7）
+## エージェント構成（DCC-7）
 
-親エージェントがコンテキスト（スクリーンショット・会話履歴・プラン）を保持し、<br>必要に応じて子エージェントに委譲する。
+### 全体像：親エージェントとサブエージェントの関係
+
+Claude Agent SDK では、AI は「ツール」を通じてテキスト生成以外のアクション（ファイル読み書き・Web検索・コマンド実行等）を行う。
+本プロジェクトでは、親エージェントが直接ツールを使わず、目的別のサブエージェントに委譲する構成を取っている。
 
 ```mermaid
 flowchart TD
-    Parent["親エージェント<br>（invokeClaude で起動）<br>───────────<br>tools: Agent のみ<br>canUseTool: permissionGuard"]
+    subgraph assembly ["組み立て（coach-loop.ts L260-281）"]
+        direction LR
+        A1["agents:<br>buildAgentDefinitions()"]
+        A2["tools: 'Agent'"]
+        A3["canUseTool:<br>createToolPermissionGuard()"]
+    end
 
-    Parent -->|"方向性判断が必要"| Coach["coach<br>───────────<br>方向性・美的判断<br>GUI操作案内<br>進捗評価"]
+    assembly -->|"invokeClaude() に渡す"| Engine["engine.ts<br>buildQueryOptions()"]
+    Engine -->|"queryOptions にそのまま詰め替え"| SDK["Claude Agent SDK<br>query()"]
 
-    Parent -->|"調査が必要"| Researcher["researcher<br>───────────<br>tools: WebSearch, WebFetch,<br>Read, Write, Bash, Glob"]
+    SDK --> Parent
 
-    Researcher -->|"1. スキルファイル"| SkillRead["Read<br>skills/techniques/*.md<br>skills/tools/app/*.md"]
-    Researcher -->|"2. ブログ記事"| WebSearch["WebSearch + WebFetch"]
-    Researcher -->|"3. YouTube動画"| Bash["Bash<br>bun run src/extract-video.ts"]
+    subgraph runtime ["SDK 内部の実行時構造"]
+        Parent["親エージェント<br>───────────<br>使えるツール: Agent のみ<br>（＝サブエージェントを呼ぶだけ）"]
 
-    Bash --> Gemini["gemini.ts<br>extractVideoContent()<br>Gemini 2.5 Flash API"]
+        Parent -->|"方向性判断が必要"| Advisor["advisor<br>───────────<br>tools: なし（対話のみ）<br>方向性・美的判断<br>GUI操作案内<br>進捗評価"]
 
-    Researcher -->|"蓄積"| SkillWrite["Write<br>skills/ 配下のみ"]
+        Parent -->|"調査が必要"| Researcher["researcher<br>───────────<br>tools: WebSearch, WebFetch,<br>Read, Write, Bash, Glob<br>（canUseTool の検問あり）"]
+    end
 
-    style Parent fill:#e3f2fd
-    style Coach fill:#e8f5e9
+    style assembly fill:#f5f5f5,stroke:#bdbdbd
+    style runtime fill:#e3f2fd,stroke:#90caf9
+    style Advisor fill:#e8f5e9
     style Researcher fill:#fff3e0
 ```
 
-## スキルファイルの流れ（DCC-7）
+### 3つの設定プロパティの役割
 
-スキルファイルはシステムプロンプトに目次だけ注入し、<br>中身は researcher が必要に応じて Read で読む。<br>調査結果は Write でスキルファイルに蓄積され、次回以降はローカルでヒットする。
+`invokeClaude()` に渡す3つのプロパティが、エージェントの権限構造を決定する。
+
+| プロパティ | 担当関数 | 定義場所 | 役割 |
+|-----------|---------|---------|------|
+| `agents` | `buildAgentDefinitions()` | agents.ts | **誰を呼べるか**：サブエージェントの名簿。名前・説明・プロンプト・使えるツール一覧を定義 |
+| `tools` | — (リテラル `["Agent"]`) | coach-loop.ts | **親が何をできるか**：親エージェント自身の手持ちツール。`"Agent"` = サブエージェント呼び出しのみ |
+| `canUseTool` | `createToolPermissionGuard()` | skills.ts | **使い方が安全か**：ツール実行の直前に毎回呼ばれるコールバック。引数の内容を見て allow / deny を返す |
+
+```mermaid
+flowchart LR
+    subgraph agents_prop ["agents（誰を呼べるか）"]
+        Def["buildAgentDefinitions()<br>agents.ts"]
+        Def --> Advisor2["advisor<br>tools: なし"]
+        Def --> Researcher2["researcher<br>tools: Read,Write,<br>Bash,Glob,<br>WebSearch,WebFetch"]
+    end
+
+    subgraph tools_prop ["tools（親が何をできるか）"]
+        Tools2["tools: 'Agent'<br>coach-loop.ts"]
+        Tools2 --> Only["親はサブエージェント<br>呼び出ししかできない"]
+    end
+
+    subgraph canuse_prop ["canUseTool（使い方が安全か）"]
+        Guard2["createToolPermissionGuard()<br>skills.ts"]
+        Guard2 --> Check["ツール実行の直前に<br>毎回コールバックされ<br>allow / deny を返す"]
+    end
+```
+
+### 注意: createToolPermissionGuard() が実質 researcher にのみ影響する理由
+
+`createToolPermissionGuard()` は SDK レベルでは**全エージェント共通**のコールバックとして登録される。
+しかし、このコールバックが発火するのは「ツールを実行しようとした瞬間」のみであるため、
+ツールを持たないエージェントには判定が走る機会自体がない。
+
+```mermaid
+flowchart LR
+    subgraph parent ["親エージェント"]
+        PT["tools: Agent のみ"]
+        PT --> PA["Agent ツールで<br>サブエージェントを呼ぶ"]
+        PA -.- PG["canUseTool?<br>→ Agent の実行に対しては<br>SDK が呼ばない"]
+    end
+
+    subgraph advisor_box ["advisor"]
+        AT["tools: なし"]
+        AT --> AA["テキスト生成のみ<br>ツール呼び出しなし"]
+        AA -.- AG["canUseTool?<br>→ 発火する機会がない"]
+    end
+
+    subgraph researcher_box ["researcher"]
+        RT["tools: Read, Write,<br>Bash, Glob,<br>WebSearch, WebFetch"]
+        RT --> RA["ツールを使うたびに<br>canUseTool が発火"]
+        RA --> RG["createToolPermissionGuard()<br>が allow / deny を判定"]
+    end
+
+    style PG fill:#f5f5f5,stroke:#bdbdbd,stroke-dasharray: 5 5
+    style AG fill:#f5f5f5,stroke:#bdbdbd,stroke-dasharray: 5 5
+    style RG fill:#fff3e0,stroke:#ff9800
+```
+
+| エージェント | tools | canUseTool が発火するか | 理由 |
+|-------------|-------|----------------------|------|
+| 親 | `["Agent"]` | しない | SDK は Agent ツール（サブエージェント呼び出し）に対して canUseTool を呼ばない |
+| advisor | なし | しない | ツールを一切持たないので、判定を受ける機会がない |
+| researcher | 6つ | **する** | Read / Write / Bash 等を使うたびに毎回判定される |
+
+結果として、`createToolPermissionGuard()` 内の判定ロジック（skills/ 配下のみ書き込み可、Bash は extract-video.ts のみ等）は**事実上 researcher のためのルール**となっている。
+関数名を `createToolPermissionGuard` としているのは、これが SDK の `canUseTool` コールバックとして全体に登録される仕組みであることを正確に表すためである。
+
+### ツール実行時の二重チェック
+
+サブエージェントがツールを使おうとしたとき、2段階のチェックが走る。
+
+```mermaid
+sequenceDiagram
+    participant R as researcher
+    participant SDK as Claude Agent SDK
+    participant CUT as canUseTool<br>(permissionGuard)
+    participant Tool as 実際のツール<br>(Read, Write等)
+
+    R->>SDK: Read("skills/masks.md") を使いたい
+
+    Note over SDK: チェック①<br>researcher の tools に<br>"Read" が含まれるか？
+    SDK->>SDK: ✅ tools に "Read" あり
+
+    Note over SDK: チェック②<br>canUseTool に問い合わせ
+    SDK->>CUT: canUseTool("Read", {file_path: "skills/masks.md"})
+    CUT->>CUT: skills/ 配下か判定
+    CUT-->>SDK: { behavior: "allow" }
+
+    SDK->>Tool: Read 実行
+    Tool-->>R: ファイル内容を返す
+
+    Note over R,Tool: ──── 拒否される例 ────
+
+    R->>SDK: Read("src/index.ts") を使いたい
+    SDK->>SDK: ✅ tools に "Read" あり
+    SDK->>CUT: canUseTool("Read", {file_path: "src/index.ts"})
+    CUT->>CUT: skills/ でも docs/ でもない
+    CUT-->>SDK: { behavior: "deny" }
+    SDK-->>R: ❌ ブロック
+```
+
+### canUseTool の判定ルール一覧
+
+`createToolPermissionGuard()` (skills.ts) が返すコールバック関数の判定ルール。
+
+```mermaid
+flowchart TD
+    ToolCall["ツール呼び出し"] --> Switch{ツール名？}
+
+    Switch -->|"Read / Glob"| ReadCheck["checkReadPermission()"]
+    ReadCheck --> ReadPath{"パスが skills/ または<br>docs/ 配下か？"}
+    ReadPath -->|Yes| RA["allow ✅"]
+    ReadPath -->|No| RD["deny ❌"]
+
+    Switch -->|Write| WriteCheck["checkWritePermission()"]
+    WriteCheck --> WritePath{"パスが skills/ 配下か？<br>（sep 付きプレフィクス一致）"}
+    WritePath -->|Yes| WA["allow ✅"]
+    WritePath -->|No| WD["deny ❌"]
+
+    Switch -->|Bash| BashCheck["checkBashPermission()<br>→ validateBashCommand()"]
+    BashCheck --> Meta{"シェルメタ文字<br>; | & ` $ 等？"}
+    Meta -->|あり| BD1["deny ❌"]
+    Meta -->|なし| Structure{"bun run<br>src/extract-video.ts<br>[YouTube URL]？"}
+    Structure -->|Yes| BA["allow ✅"]
+    Structure -->|No| BD2["deny ❌"]
+
+    Switch -->|"WebSearch / WebFetch"| WEB["allow ✅<br>（無条件）"]
+
+    Switch -->|"その他（Edit等）"| DEFAULT["deny ❌<br>（未知のツールは全拒否）"]
+```
+
+### スキルファイルの流れ
+
+スキルファイルはシステムプロンプトに**目次（ファイルパス一覧）だけ**注入し、<br>中身は researcher が必要に応じて Read で読む。<br>調査結果は Write でスキルファイルに蓄積され、次回以降はローカルでヒットする。
 
 ```mermaid
 flowchart LR
@@ -379,40 +542,19 @@ flowchart LR
     end
 
     Plan["Plan<br>steps[].application"]
-    Plan -->|"buildSkillManifest()"| Manifest["目次文字列<br>- skills/techniques/gradients.md<br>- skills/tools/photoshop/filters.md<br>- ..."]
+    Plan -->|"loadSkillManifest()<br>→ buildSkillManifest()"| Manifest["目次文字列<br>- skills/techniques/gradients.md<br>- skills/tools/photoshop/filters.md<br>- ..."]
 
-    Manifest -->|"システムプロンプトに注入"| SysPrompt["buildCoachSystemPrompt()"]
+    Manifest -->|"buildCoachSystemPrompt() で<br>skill-reference-data タグに格納"| SysPrompt["システムプロンプト"]
 
-    Researcher["researcher"] -->|"Read（必要なものだけ）"| skills
-    Researcher -->|"Write（蓄積）"| skills
+    SysPrompt --> Parent2["親エージェント<br>（目次を見て researcher に指示）"]
+    Parent2 --> Researcher3["researcher"]
 
-    WebResult["Web検索結果<br>YouTube抽出結果"] --> Researcher
+    Researcher3 -->|"Read（必要なものだけ）"| skills
+    Researcher3 -->|"Write（蓄積）"| skills
+
+    WebResult["Web検索結果<br>YouTube抽出結果"] --> Researcher3
 
     style Manifest fill:#e8eaf6,stroke:#5c6bc0
-```
-
-## セキュリティガード（DCC-7）
-
-researcher の Write / Bash をコードレベルで制限する `createResearcherPermissionGuard()`。
-
-```mermaid
-flowchart TD
-    ToolCall["researcher がツールを呼ぶ"] --> Guard["createResearcherPermissionGuard()"]
-
-    Guard --> CheckTool{ツール名？}
-
-    CheckTool -->|Write| CheckPath{"file_path が<br>skills/ 配下？"}
-    CheckPath -->|Yes| Allow1["allow ✅"]
-    CheckPath -->|No| Deny1["deny ❌<br>skills/ 外への書き込み禁止"]
-
-    CheckTool -->|Bash| ValidateCmd["validateBashCommand()"]
-    ValidateCmd --> CheckMeta{"シェルメタ文字<br>; | & ` $ 等？"}
-    CheckMeta -->|あり| Deny2["deny ❌"]
-    CheckMeta -->|なし| CheckStructure{"bun run<br>src/extract-video.ts<br>+ YouTube URL？"}
-    CheckStructure -->|Yes| Allow2["allow ✅"]
-    CheckStructure -->|No| Deny3["deny ❌"]
-
-    CheckTool -->|その他| Allow3["allow ✅"]
 ```
 
 ## 関連ドキュメント

@@ -11,7 +11,7 @@ export async function verifySession(): Promise<VerifyResult> {
     prompt: `私の名前は「${SECRET_NAME}」です。覚えてください。「覚えました」とだけ答えてください。`,
     timeoutMs: 60_000,
     maxTurns: 1,
-    permissionMode: "bypassPermissions",
+    tools: [],
   });
 
   if (!first.isOk) {
@@ -41,7 +41,7 @@ export async function verifySession(): Promise<VerifyResult> {
     sessionId: first.sessionId,
     timeoutMs: 60_000,
     maxTurns: 1,
-    permissionMode: "bypassPermissions",
+    tools: [],
   });
 
   const durationMs = performance.now() - start;

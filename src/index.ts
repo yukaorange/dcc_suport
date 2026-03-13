@@ -4,6 +4,7 @@ import { defaultConfig, loadConfig } from "./config";
 import { printLoopEvent, printSetupEvent } from "./output";
 import type { Plan } from "./planner";
 import { runSetupFlow } from "./setup-flow";
+import { loadSkillManifest } from "./skills";
 
 const CONFIG_PATH = "./config.json";
 const abortController = new AbortController();
@@ -56,6 +57,10 @@ if (setupResult.isOk) {
   }
 }
 
+// --- スキルファイル目次の生成 ---
+const applications = plan?.steps.map((s) => s.application) ?? [];
+const skillManifest = await loadSkillManifest(applications);
+
 // --- コーチングループ ---
 const rl = createInterface({ input: process.stdin });
 
@@ -75,6 +80,7 @@ const { loopFinished, submitMessage } = startCoachLoop({
   displayId,
   referenceImagePath,
   plan,
+  skillManifest,
 });
 
 rl.on("line", (line) => {

@@ -128,8 +128,7 @@ export async function generatePlan(input: GeneratePlanInput): Promise<GeneratePl
   const engineResult = await invokeClaude({
     prompt: buildPlanGenerationPrompt(input),
     appendSystemPrompt: PLAN_SYSTEM_PROMPT,
-    permissionMode: "bypassPermissions",
-    allowedTools: [],
+    tools: [],
     maxTurns: 3,
     timeoutMs: 120_000,
     signal: input.signal,

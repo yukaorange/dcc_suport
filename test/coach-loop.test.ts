@@ -28,6 +28,14 @@ vi.mock("../src/engine", () => ({
 	checkSessionContinuity,
 }));
 
+vi.mock("../src/agents", () => ({
+	buildAgentDefinitions: vi.fn().mockReturnValue({}),
+}));
+
+vi.mock("../src/skills", () => ({
+	createToolPermissionGuard: vi.fn().mockReturnValue(async () => ({ behavior: "allow" })),
+}));
+
 const FAKE_IMAGE = {
 	pngBuffer: Buffer.from("fake-png"),
 	rawPixels: new Uint8Array(16),
@@ -58,6 +66,7 @@ function runLoop(abortController: AbortController, onEvent: (e: LoopEvent) => vo
 		onEvent,
 		referenceImagePath: null,
 		plan: null,
+		skillManifest: null,
 	});
 }
 
@@ -163,6 +172,7 @@ describe("startCoachLoop", () => {
 			onEvent: (e) => events.push(e),
 			referenceImagePath: null,
 			plan: null,
+			skillManifest: null,
 		});
 
 		await loopFinished;
@@ -200,6 +210,7 @@ describe("startCoachLoop", () => {
 			onEvent,
 			referenceImagePath: "/tmp/ref.png",
 			plan,
+			skillManifest: null,
 		});
 		await loopFinished;
 
@@ -210,6 +221,39 @@ describe("startCoachLoop", () => {
 		expect(call.appendSystemPrompt).toContain("/tmp/ref.png");
 		expect(call.appendSystemPrompt).toContain("テスト用ゴール");
 		expect(call.appendSystemPrompt).toContain("[Illustrator] ベクター作成");
+	});
+
+	test("skillManifestがinvokeClaudeのappendSystemPromptに反映される", async () => {
+		invokeClaude.mockClear();
+
+		captureScreen.mockResolvedValue({ isOk: true, image: FAKE_IMAGE });
+		invokeClaude.mockResolvedValue({
+			isOk: true,
+			result: "アドバイスです",
+			sessionId: "skill-session",
+			rawMessages: [],
+		});
+		checkSessionContinuity.mockReturnValue({ continuable: true });
+
+		const { abortController, onEvent } = collectEvents("advice");
+
+		const { loopFinished } = startCoachLoop({
+			config: { ...defaultConfig, intervalSeconds: 0 },
+			signal: abortController.signal,
+			onEvent,
+			referenceImagePath: null,
+			plan: null,
+			skillManifest: "- skills/techniques/masks.md\n- skills/tools/photoshop/shortcuts.md",
+		});
+		await loopFinished;
+
+		const call = invokeClaude.mock.calls[0][0];
+		expect(call.appendSystemPrompt).toContain("スキルファイル（操作リファレンス）");
+		expect(call.appendSystemPrompt).toContain("skills/techniques/masks.md");
+		expect(call.appendSystemPrompt).toContain("skills/tools/photoshop/shortcuts.md");
+		expect(call.agents).toBeDefined();
+		expect(call.tools).toContain("Agent");
+		expect(call.canUseTool).toBeDefined();
 	});
 
 	test("ABORTED応答時はengine_errorイベントが発火しない", async () => {
@@ -234,6 +278,7 @@ describe("startCoachLoop", () => {
 			},
 			referenceImagePath: null,
 			plan: null,
+			skillManifest: null,
 		});
 
 		await loopFinished;

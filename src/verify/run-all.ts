@@ -6,6 +6,7 @@ import { verifyImage } from "./verify-image";
 import { verifySession } from "./verify-session";
 import { verifyStreaming } from "./verify-streaming";
 import { verifySystemPrompt } from "./verify-system-prompt";
+import { verifyVideoExtraction } from "./verify-video-extraction";
 
 type VerifyEntry = {
   readonly label: string;
@@ -19,6 +20,7 @@ const verifications: readonly VerifyEntry[] = [
   { label: "Agents (Subagent)", run: verifyAgents },
   { label: "System Prompt Append", run: verifySystemPrompt },
   { label: "Capture + Diff", run: verifyCaptureDiff },
+  { label: "Video Extraction (Gemini)", run: verifyVideoExtraction },
 ];
 
 function statusIcon(status: string): string {

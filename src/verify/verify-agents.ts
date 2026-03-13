@@ -16,8 +16,8 @@ function hasSubagentTrace(rawMessages: readonly unknown[]): boolean {
 
     const json = JSON.stringify(msg);
 
-    if (json.includes('"coach"') && json.includes("task")) return true;
-    if (json.includes("Task") && json.includes("coach")) return true;
+    if (json.includes('"coach"') && json.includes("agent")) return true;
+    if (json.includes("Agent") && json.includes("coach")) return true;
     if (json.includes("subagent")) return true;
     if ("type" in msg && (msg as { type: string }).type === "assistant" && json.includes("coach"))
       return true;
@@ -31,11 +31,10 @@ export async function verifyAgents(): Promise<VerifyResult> {
   const result = await invokeClaude({
     prompt: "coachエージェントにこの質問を委任してください: 1+1は？",
     agents: testAgents,
-    allowedTools: ["Task"],
+    tools: ["Agent"],
     model: "sonnet",
     timeoutMs: 120_000,
     maxTurns: 5,
-    permissionMode: "bypassPermissions",
   });
 
   const durationMs = performance.now() - start;

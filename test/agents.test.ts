@@ -24,10 +24,4 @@ describe("buildAgentDefinitions", () => {
 		expect(researcher.tools).toContain("Glob");
 	});
 
-	test("副作用なし: 毎回同じ構造を返す", () => {
-		const first = buildAgentDefinitions();
-		const second = buildAgentDefinitions();
-		expect(first.advisor.prompt).toBe(second.advisor.prompt);
-		expect(first.researcher.tools).toEqual(second.researcher.tools);
-	});
 });

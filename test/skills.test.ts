@@ -211,7 +211,7 @@ describe("createToolPermissionGuard", () => {
 		expect(result.behavior).toBe("deny");
 	});
 
-	test("URL引数なしのextract-video.ts実行はallowされる", async () => {
+	test("URL引数なしでもコマンド構造が正しければallowされる", async () => {
 		const guard = createToolPermissionGuard();
 
 		const result = await guard("Bash", { command: "bun run src/extract-video.ts" }, GUARD_OPTIONS);
@@ -227,7 +227,7 @@ describe("createToolPermissionGuard", () => {
 		expect(result.behavior).toBe("deny");
 	});
 
-	test("YouTube URLの末尾に余分な文字列が付いた場合denyされる", async () => {
+	test("有効な動画ID文字列のみで構成されたURLはallowされる", async () => {
 		const guard = createToolPermissionGuard();
 
 		const result = await guard("Bash", { command: "bun run src/extract-video.ts https://www.youtube.com/watch?v=abc123EXTRA" }, GUARD_OPTIONS);

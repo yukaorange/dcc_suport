@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { extractVideoContent } from "../src/gemini";
+import { YOUTUBE_URL_PATTERN, extractVideoContent } from "../src/gemini";
 
 describe("extractVideoContent", () => {
 	test("GEMINI_API_KEYが未設定の場合、NO_API_KEYエラーを返す", async () => {
@@ -24,4 +24,33 @@ describe("extractVideoContent", () => {
 		}
 		delete process.env.GEMINI_API_KEY;
 	});
+});
+
+describe("YOUTUBE_URL_PATTERN", () => {
+	test("標準的なyoutube.com URLにマッチする", () => {
+		expect(YOUTUBE_URL_PATTERN.test("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe(true);
+	});
+
+	test("youtu.be短縮URLにマッチする", () => {
+		expect(YOUTUBE_URL_PATTERN.test("https://youtu.be/dQw4w9WgXcQ")).toBe(true);
+	});
+
+	test("www なしのURLにマッチする", () => {
+		expect(YOUTUBE_URL_PATTERN.test("https://youtube.com/watch?v=abc123")).toBe(true);
+	});
+
+	test("YouTube以外のURLにマッチしない", () => {
+		expect(YOUTUBE_URL_PATTERN.test("https://example.com/watch?v=abc123")).toBe(false);
+	});
+
+	test("クエリパラメータ付きURLにマッチする", () => {
+		expect(YOUTUBE_URL_PATTERN.test("https://www.youtube.com/watch?v=abc123&list=PLxyz")).toBe(true);
+		expect(YOUTUBE_URL_PATTERN.test("https://www.youtube.com/watch?v=abc123&t=120")).toBe(true);
+		expect(YOUTUBE_URL_PATTERN.test("https://youtu.be/abc123?si=XXXXXXXXXXXXX")).toBe(true);
+	});
+
+	test("URLの末尾にパスが付いた場合マッチしない", () => {
+		expect(YOUTUBE_URL_PATTERN.test("https://www.youtube.com/watch?v=abc123/extra")).toBe(false);
+	});
+
 });

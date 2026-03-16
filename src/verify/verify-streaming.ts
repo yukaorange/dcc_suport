@@ -13,7 +13,7 @@ async function verifyMessageStructure(): Promise<VerifyResult> {
     prompt: "1+1は？数字だけ答えて",
     timeoutMs: 60_000,
     maxTurns: 1,
-    permissionMode: "bypassPermissions",
+    tools: [],
   });
 
   const durationMs = performance.now() - start;
@@ -107,7 +107,7 @@ async function verifyAbortSignal(): Promise<VerifyResult> {
     prompt: "1から1000までの素数をすべて列挙してください。省略せずに全て書いてください。",
     timeoutMs,
     maxTurns: 1,
-    permissionMode: "bypassPermissions",
+    tools: [],
   });
 
   const elapsedMs = performance.now() - start;

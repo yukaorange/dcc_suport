@@ -21,6 +21,7 @@ export function printLoopEvent(event: LoopEvent): void {
       console.log(`  [~] 差分スキップ: ${event.reason}`);
       break;
     case "no_change":
+      console.log(`  [~] 変化なし: ${event.diffRatePercent}%`);
       break;
     case "user_message_received":
       console.log(`\n  [You] ${event.message}`);
@@ -36,6 +37,7 @@ export function printLoopEvent(event: LoopEvent): void {
       break;
     }
     case "silent":
+      console.log("  [~] アドバイスなし。静観します。");
       break;
     case "engine_error":
       console.log(`  [!] AI応答エラー: ${event.message}`);

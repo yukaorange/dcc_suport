@@ -1,12 +1,14 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildAgentDefinitions } from "./agents";
 import { type CapturedImage, captureScreen } from "./capture";
 import type { CoachConfig } from "./config";
 import { computeDiff } from "./diff";
 import { checkSessionContinuity, type EngineResult, invokeClaude } from "./engine";
 import type { Plan, PlanStepStatus } from "./planner";
 import { buildCoachSystemPrompt, buildCoachUserPrompt } from "./prompts";
+import { createToolPermissionGuard } from "./skills";
 
 type CoachAdvice = {
   readonly content: string;
@@ -66,6 +68,7 @@ type CoachLoopOptions = {
   readonly displayId?: string;
   readonly referenceImagePath: string | null;
   readonly plan: Plan | null;
+  readonly skillManifest: string | null;
 };
 
 type CoachLoopHandle = {
@@ -133,6 +136,7 @@ function parseAdvice(result: string): string | null {
 }
 
 function deriveNextState(
+  //次のラウンドへ導く
   current: LoopState,
   newImage: CapturedImage,
   engineResult: EngineResult | null,
@@ -266,11 +270,13 @@ async function executeOneRound(
     appendSystemPrompt: buildCoachSystemPrompt({
       referenceImagePath: options.referenceImagePath,
       plan: state.plan,
+      skillManifest: options.skillManifest,
     }),
-    permissionMode: "bypassPermissions",
-    allowedTools: [],
-    maxTurns: 3,
-    timeoutMs: 60_000,
+    agents: buildAgentDefinitions(),
+    tools: ["Agent"],
+    canUseTool: createToolPermissionGuard(),
+    maxTurns: 15,
+    timeoutMs: 120_000,
     signal: options.signal,
   });
 
@@ -296,6 +302,7 @@ async function executeOneRound(
   }
 
   const advice = parseAdvice(engineResult.result);
+
   if (advice === null) {
     onEvent({ kind: "silent" });
   } else {

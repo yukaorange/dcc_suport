@@ -14,9 +14,9 @@ export async function verifySystemPrompt(): Promise<VerifyResult> {
   const result = await invokeClaude({
     prompt: "シークレットコードは何ですか？コードだけ答えてください。",
     appendSystemPrompt: skillContent,
+    tools: [],
     timeoutMs: 60_000,
     maxTurns: 1,
-    permissionMode: "bypassPermissions",
   });
 
   const durationMs = performance.now() - start;

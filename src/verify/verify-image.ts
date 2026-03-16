@@ -23,9 +23,10 @@ export async function verifyImage(): Promise<VerifyResult> {
 
   const result = await invokeClaude({
     prompt: `この画像を見て、何色が見えるか1単語で答えてください: ${TEST_IMAGE_PATH}`,
+    appendSystemPrompt: "画像ファイルのパスが提示されたら、その画像を確認して回答してください。",
+    tools: [],
     timeoutMs: 60_000,
     maxTurns: 3,
-    permissionMode: "bypassPermissions",
   });
 
   const durationMs = performance.now() - start;

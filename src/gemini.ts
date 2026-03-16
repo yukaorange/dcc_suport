@@ -1,17 +1,17 @@
-import { GoogleGenAI } from "@google/genai";
+import { type GenerateContentResponse, GoogleGenAI } from "@google/genai";
 
 type ExtractVideoResult =
   | { readonly isOk: true; readonly content: string }
   | {
       readonly isOk: false;
-      readonly errorCode: "NO_API_KEY" | "API_ERROR";
+      readonly errorCode: "NO_API_KEY" | "INVALID_URL" | "API_ERROR";
       readonly message: string;
     };
 
 export type { ExtractVideoResult };
 
-const YOUTUBE_URL_PATTERN =
-  /^https?:\/\/(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[a-zA-Z0-9_-]+/;
+export const YOUTUBE_URL_PATTERN =
+  /^https?:\/\/(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[a-zA-Z0-9_-]+$/;
 
 const EXTRACTION_PROMPT = `この動画からDCCツールの操作手順を構造化して抽出してください。
 以下の形式で出力:
@@ -28,24 +28,29 @@ export async function extractVideoContent(youtubeUrl: string): Promise<ExtractVi
   }
 
   if (!YOUTUBE_URL_PATTERN.test(youtubeUrl)) {
-    return { isOk: false, errorCode: "API_ERROR", message: `Invalid YouTube URL: ${youtubeUrl}` };
+    return { isOk: false, errorCode: "INVALID_URL", message: `Invalid YouTube URL: ${youtubeUrl}` };
   }
 
   const ai = new GoogleGenAI({ apiKey });
 
-  // @throws — Gemini API呼び出しエラー
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { fileData: { fileUri: youtubeUrl, mimeType: "video/mp4" } },
-          { text: EXTRACTION_PROMPT },
-        ],
-      },
-    ],
-  });
+  let response: GenerateContentResponse;
+  try {
+    response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { fileData: { fileUri: youtubeUrl, mimeType: "video/mp4" } },
+            { text: EXTRACTION_PROMPT },
+          ],
+        },
+      ],
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { isOk: false, errorCode: "API_ERROR" as const, message };
+  }
 
   const text = response.text;
   if (!text || text.trim().length === 0) {

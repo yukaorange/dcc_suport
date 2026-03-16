@@ -15,12 +15,12 @@ describe("extractVideoContent", () => {
 		if (originalKey) process.env.GEMINI_API_KEY = originalKey;
 	});
 
-	test("不正なURLの場合、API_ERRORを返す", async () => {
+	test("不正なURLの場合、INVALID_URLエラーを返す", async () => {
 		process.env.GEMINI_API_KEY = "dummy-key";
 		const result = await extractVideoContent("https://example.com/not-youtube");
 		expect(result.isOk).toBe(false);
 		if (!result.isOk) {
-			expect(result.errorCode).toBe("API_ERROR");
+			expect(result.errorCode).toBe("INVALID_URL");
 		}
 		delete process.env.GEMINI_API_KEY;
 	});

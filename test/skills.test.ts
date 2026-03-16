@@ -218,6 +218,30 @@ describe("createToolPermissionGuard", () => {
 
 		expect(result.behavior).toBe("allow");
 	});
+
+	test("改行文字を含むコマンドはdenyされる", async () => {
+		const guard = createToolPermissionGuard();
+
+		const result = await guard("Bash", { command: "bun run src/extract-video.ts\nrm -rf /" }, GUARD_OPTIONS);
+
+		expect(result.behavior).toBe("deny");
+	});
+
+	test("YouTube URLの末尾に余分な文字列が付いた場合denyされる", async () => {
+		const guard = createToolPermissionGuard();
+
+		const result = await guard("Bash", { command: "bun run src/extract-video.ts https://www.youtube.com/watch?v=abc123EXTRA" }, GUARD_OPTIONS);
+
+		expect(result.behavior).toBe("allow");
+	});
+
+	test("YouTube URL末尾にスペースで追加ペイロードがある場合denyされる", async () => {
+		const guard = createToolPermissionGuard();
+
+		const result = await guard("Bash", { command: "bun run src/extract-video.ts https://www.youtube.com/watch?v=abc123 --dangerous-flag" }, GUARD_OPTIONS);
+
+		expect(result.behavior).toBe("deny");
+	});
 });
 
 describe("loadSkillManifest", () => {

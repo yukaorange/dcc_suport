@@ -90,7 +90,9 @@ ${stepsText}
   }
 
   if (input.skillManifest !== null) {
-    const sanitized = input.skillManifest.replaceAll("</skill-reference-data>", "");
+    const sanitized = input.skillManifest
+      .replaceAll("</skill-reference-data>", "")
+      .replaceAll("<skill-reference-data>", "");
     sections.push(`
 ## スキルファイル（操作リファレンス）
 以下は利用可能なスキルファイルの一覧です。ファイル名から内容を判断し、必要なものをresearcherに読ませてください。

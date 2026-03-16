@@ -2,8 +2,7 @@ import { readdir } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
-
-export type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
+import { YOUTUBE_URL_PATTERN } from "./gemini";
 
 const SKILLS_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "skills");
 const TECHNIQUES_DIR = join(SKILLS_ROOT, "techniques");
@@ -37,7 +36,6 @@ function resolveToolsDirectory(application: string): string | null {
   return DIRECTORY_ALIAS[normalized] ?? normalized;
 }
 
-// @throws — ディレクトリ一覧取得エラーを空配列に変換
 async function listMarkdownFiles(dirPath: string): Promise<string[]> {
   const entries = await readdir(dirPath, { withFileTypes: true }).catch(() => null);
   if (entries === null) return [];
@@ -53,23 +51,22 @@ function formatManifest(filePaths: readonly string[]): string {
 }
 
 export async function buildSkillManifest(input: SkillManifestInput): Promise<SkillManifestResult> {
-  const allPaths: string[] = [];
-
   const techniquePaths = await listMarkdownFiles(TECHNIQUES_DIR);
-  allPaths.push(...techniquePaths);
 
   const normalizedApps = input.applications
     .map(normalizeApplicationName)
     .filter((name): name is string => name !== null);
   const uniqueApps = [...new Set(normalizedApps)];
 
-  for (const app of uniqueApps) {
-    const dirName = resolveToolsDirectory(app);
-    if (dirName === null) continue;
-    const toolsDir = join(SKILLS_ROOT, "tools", dirName);
-    const toolPaths = await listMarkdownFiles(toolsDir);
-    allPaths.push(...toolPaths);
-  }
+  const toolPathArrays = await Promise.all(
+    uniqueApps.map(async (app) => {
+      const dirName = resolveToolsDirectory(app);
+      if (dirName === null) return [];
+      return listMarkdownFiles(join(SKILLS_ROOT, "tools", dirName));
+    }),
+  );
+
+  const allPaths = [...techniquePaths, ...toolPathArrays.flat()];
 
   if (allPaths.length === 0) {
     return {
@@ -91,9 +88,7 @@ export async function loadSkillManifest(applications: readonly string[]): Promis
 
 const PROJECT_ROOT = resolve(SKILLS_ROOT, "..");
 const EXTRACT_VIDEO_SCRIPT = resolve(PROJECT_ROOT, "src", "extract-video.ts");
-const SHELL_META_CHARS = /[;|&`$(){}!<>]/;
-const YOUTUBE_URL_PATTERN =
-  /^https?:\/\/(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[a-zA-Z0-9_-]+/;
+const SHELL_META_CHARS = /[;|&`$(){}!<>\n\r\t]/;
 
 const ALLOWED_READ_ROOTS = [resolve(PROJECT_ROOT, "skills"), resolve(PROJECT_ROOT, "docs")];
 

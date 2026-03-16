@@ -1,10 +1,17 @@
 import { createInterface } from "node:readline";
-import { startCoachLoop } from "./coach-loop";
-import { defaultConfig, loadConfig } from "./config";
-import { printLoopEvent, printSetupEvent } from "./output";
-import type { Plan } from "./planner";
+import {
+  defaultConfig,
+  generatePlan,
+  listDisplays,
+  loadConfig,
+  loadSkillManifest,
+  type Plan,
+  printLoopEvent,
+  printSetupEvent,
+  startCoachLoop,
+} from "@dcc/core";
+import { confirm, input, select } from "@inquirer/prompts";
 import { runSetupFlow } from "./setup-flow";
-import { loadSkillManifest } from "./skills";
 
 const CONFIG_PATH = "./config.json";
 const abortController = new AbortController();
@@ -31,7 +38,13 @@ if (configResult.isOk) {
 }
 
 // --- セットアップフロー ---
-const setupResult = await runSetupFlow(abortController.signal);
+const setupResult = await runSetupFlow(abortController.signal, {
+  listDisplays,
+  generatePlan,
+  select,
+  input,
+  confirm,
+});
 
 let displayId: string | undefined;
 let referenceImagePath: string | null = null;

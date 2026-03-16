@@ -1,0 +1,12 @@
+{
+  "name": "@dcc/server",
+  "version": "0.0.1",
+  "type": "module",
+  "dependencies": {
+    "@dcc/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "catalog:"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@dcc/cli",
+  "version": "0.0.1",
+  "type": "module",
+  "dependencies": {
+    "@dcc/core": "workspace:*",
+    "@inquirer/prompts": "^8.3.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "catalog:"
+  }
+}

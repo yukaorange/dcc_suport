@@ -3,18 +3,22 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "types": ["bun-types"],
     "strict": true,
     "skipLibCheck": true,
-    "noEmit": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
-    "outDir": "./dist",
-    "rootDir": "./src"
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/cli" },
+    { "path": "packages/server" },
+    { "path": "packages/client" }
+  ],
+  "files": []
 }

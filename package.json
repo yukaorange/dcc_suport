@@ -1,38 +1,40 @@
 {
   "name": "dcc-support",
-  "version": "0.0.1",
-  "type": "module",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "catalog": {
+    "vitest": "^4.0.18",
+    "typescript": "^5.8.0",
+    "@biomejs/biome": "^2.4.5",
+    "sharp": "^0.34.5",
+    "screenshot-desktop": "^1.15.3"
+  },
   "scripts": {
-    "start": "bun run src/index.ts",
-    "dev": "bun --watch run src/index.ts",
-    "typecheck": "tsc --noEmit",
+    "start": "bun run packages/cli/src/index.ts",
+    "dev": "bun --watch run packages/cli/src/index.ts",
+    "start:web": "echo 'Not implemented yet. See Step 2 in .work/plan-DCC-8.md' && exit 1",
+    "typecheck": "tsc -b",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:watch": "vitest",
-    "check": "bun run typecheck && biome ci .",
-    "verify": "bun run src/verify/run-all.ts",
-    "verify:streaming": "bun run src/verify/verify-streaming.ts",
-    "verify:image": "bun run src/verify/verify-image.ts",
-    "verify:session": "bun run src/verify/verify-session.ts",
-    "verify:agents": "bun run src/verify/verify-agents.ts",
-    "verify:prompt": "bun run src/verify/verify-system-prompt.ts",
-    "verify:capture-diff": "bun run src/verify/verify-capture-diff.ts",
-    "verify:coach-loop": "bun run src/verify/verify-coach-loop.ts"
-  },
-  "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.63",
-    "@google/genai": "^1.45.0",
-    "@inquirer/prompts": "^8.3.0",
-    "pixelmatch": "^7.0.0",
-    "screenshot-desktop": "^1.15.3",
-    "sharp": "^0.34.0"
+    "check": "tsc -b && biome ci .",
+    "verify": "bun run packages/core/src/verify/run-all.ts",
+    "verify:streaming": "bun run packages/core/src/verify/verify-streaming.ts",
+    "verify:image": "bun run packages/core/src/verify/verify-image.ts",
+    "verify:session": "bun run packages/core/src/verify/verify-session.ts",
+    "verify:agents": "bun run packages/core/src/verify/verify-agents.ts",
+    "verify:prompt": "bun run packages/core/src/verify/verify-system-prompt.ts",
+    "verify:capture-diff": "bun run packages/core/src/verify/verify-capture-diff.ts",
+    "verify:coach-loop": "bun run packages/core/src/verify/verify-coach-loop.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.5",
+    "@biomejs/biome": "catalog:",
     "@types/bun": "latest",
-    "typescript": "^5.8.0",
-    "vitest": "^4.0.18"
+    "screenshot-desktop": "catalog:",
+    "sharp": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

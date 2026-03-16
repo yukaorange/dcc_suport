@@ -1,12 +1,14 @@
 node_modules/
 dist/
-sessions/
+*.tsbuildinfo
+**/sessions/*.sqlite
+**/sessions/*.sqlite-*
 *.log
 .DS_Store
 .work/
 .env
 .env.*
 verify-report.md
-src/verify/tmp/
+packages/core/src/verify/tmp/
 .coach-tmp/
 .claude/

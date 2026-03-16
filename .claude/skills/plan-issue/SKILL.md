@@ -114,7 +114,7 @@ codexを呼ぶときはtimeoutを延長すること。(7分以上を推奨)
 ``` bash
 # initial plan review request
 # 必ず-mでモデルを指定すること（2027.2時点ではgpt-5.3-codexが最適）
-codex exec -m gpt-5.3-codex "このプランをレビューして。瑣末な点への不要なリプライはするな。致命的な点への指摘に尽力せよ。: {plan_full_path} (ref: CLAUDE.md, .claude/rules/coderule.md, .claude/rules/convention.md)"
+codex exec -m gpt-5.4-codex "このプランをレビューして。瑣末な点への不要なリプライはするな。致命的な点への指摘に尽力せよ。: {plan_full_path} (ref: CLAUDE.md, .claude/rules/coderule.md, .claude/rules/convention.md)"
 
 # updated plan review request
 # resume --last をつけないと最初のレビューのコンテキストを忘却されるので注意

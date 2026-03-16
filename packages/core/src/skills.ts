@@ -1,10 +1,9 @@
 import { readdir } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, relative, resolve, sep } from "node:path";
 import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { YOUTUBE_URL_PATTERN } from "./gemini";
+import { EXTRACT_VIDEO_SCRIPT, SKILLS_ROOT } from "./paths";
 
-const SKILLS_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "skills");
 const TECHNIQUES_DIR = join(SKILLS_ROOT, "techniques");
 
 type SkillManifestInput = {
@@ -86,11 +85,11 @@ export async function loadSkillManifest(applications: readonly string[]): Promis
   return result.isOk ? result.manifest : null;
 }
 
-const PROJECT_ROOT = resolve(SKILLS_ROOT, "..");
-const EXTRACT_VIDEO_SCRIPT = resolve(PROJECT_ROOT, "src", "extract-video.ts");
+const PACKAGE_ROOT = resolve(SKILLS_ROOT, "..");
+const DOCS_ROOT = resolve(PACKAGE_ROOT, "..", "..", "docs");
 const SHELL_META_CHARS = /[;|&`$(){}!<>\n\r\t]/;
 
-const ALLOWED_READ_ROOTS = [resolve(PROJECT_ROOT, "skills"), resolve(PROJECT_ROOT, "docs")];
+const ALLOWED_READ_ROOTS = [resolve(SKILLS_ROOT), resolve(DOCS_ROOT)];
 
 function validateBashCommand(
   command: string,

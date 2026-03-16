@@ -1,6 +1,6 @@
 # アーキテクチャ概要
 
-更新日: 2026-03-12
+更新日: 2026-03-16
 
 ## 全体フロー（現行 + DCC-7）
 
@@ -557,7 +557,199 @@ flowchart LR
     style Manifest fill:#e8eaf6,stroke:#5c6bc0
 ```
 
+## DCC-8: モノレポ構成 + プログレスダッシュボード + セッション管理
+
+更新日: 2026-03-16
+
+DCC-8 では CLIセットアップをブラウザGUIに置き換え、プログレスダッシュボードとセッション永続化を追加する。
+既存コードをモノレポに再構成し、4つのパッケージに分離する。
+
+### パッケージ構成
+
+```mermaid
+graph TD
+    subgraph packages ["packages/"]
+        Core["@dcc/core<br>───────────<br>共有ドメインロジック<br>coach-loop, planner,<br>engine, config 等"]
+        Server["@dcc/server<br>───────────<br>Hono + tRPC + DB<br>API層, EventBus,<br>セッション管理"]
+        Client["@dcc/client<br>───────────<br>React SPA<br>Vite, TanStack Query"]
+        CLI["@dcc/cli<br>───────────<br>CLI版エントリ<br>inquirer"]
+    end
+
+    CLI -->|"workspace:*"| Core
+    Server -->|"workspace:*"| Core
+    Client -.->|"型のみ参照<br>AppRouter"| Server
+
+    style Core fill:#e8f5e9
+    style Server fill:#e3f2fd
+    style Client fill:#fff3e0
+    style CLI fill:#f5f5f5
+```
+
+### 技術スタック（DCC-8 追加分）
+
+| 領域 | 技術 | 役割 |
+|------|------|------|
+| モノレポ | Bun workspaces | パッケージ分離 |
+| サーバー | Hono | 軽量Webフレームワーク。Bun.serve() で起動 |
+| API | tRPC v11 | 型安全なRPC。Hono fetchアダプタ経由 |
+| リアルタイム | tRPC subscription (SSE) | サーバー→ブラウザの一方向ストリーム |
+| フロントエンド | React 19 + Vite | SPA。開発時はVite proxy経由でHonoと通信 |
+| 状態管理 | TanStack Query | tRPC React統合でサーバー状態を管理 |
+| DB | bun:sqlite (WALモード) | セッション・プラン・アドバイス履歴の永続化 |
+
+### 全体フロー（GUI版 / DCC-8）
+
+```mermaid
+flowchart TD
+    Start([bun run start:web]) --> LoadConfig["@dcc/core<br>loadConfig()"]
+    LoadConfig --> InitDB["@dcc/server<br>createDatabase()"]
+    InitDB --> StartHono["Hono + tRPC<br>localhost:3456"]
+
+    subgraph browser ["ブラウザ（React SPA）"]
+        SetupUI["セットアップUI<br>ディスプレイ選択<br>リファレンス画像D&D<br>目標入力"]
+        PlanReview["プラン確認<br>承認 / 再生成"]
+        Dashboard["ダッシュボード<br>プラン進捗<br>アドバイス履歴"]
+        SessionList["セッション一覧<br>過去セッション閲覧<br>復元"]
+    end
+
+    StartHono --> SetupUI
+    SetupUI -->|"tRPC mutation<br>plan.generate"| GenPlan["@dcc/core<br>generatePlan()"]
+    GenPlan --> PlanReview
+    PlanReview -->|"tRPC mutation<br>setup.start"| StartLoop
+
+    StartLoop["@dcc/server<br>coach-session.ts<br>startCoachLoop()"]:::dcc8
+
+    subgraph loop ["コーチングループ（既存・変更なし）"]
+        Capture["captureScreen()"]
+        Diff["computeDiff()"]
+        Engine["invokeClaude()"]
+    end
+
+    StartLoop --> Capture
+
+    subgraph eventflow ["イベント配信"]
+        EventBus["EventBus<br>(TaggedLoopEvent)"]:::dcc8
+        SSE["tRPC subscription<br>(SSE)"]:::dcc8
+        DB["bun:sqlite<br>INSERT advice"]:::dcc8
+    end
+
+    Engine -->|"onEvent()"| EventBus
+    EventBus -->|"sessionIdフィルタ"| SSE
+    SSE -->|"リアルタイム"| Dashboard
+    EventBus --> DB
+
+    SessionList -->|"tRPC query<br>session.list"| DB
+    Dashboard -->|"tRPC query<br>session.get"| DB
+
+    classDef dcc8 fill:#e8eaf6,stroke:#5c6bc0
+```
+
+### パッケージ間の依存と型の流れ
+
+```mermaid
+flowchart LR
+    subgraph core ["@dcc/core"]
+        Types["Plan, LoopEvent,<br>CoachAdvice,<br>CoachConfig 等"]
+    end
+
+    subgraph server ["@dcc/server"]
+        Router["AppRouter<br>(tRPCルーター)"]
+        TaggedEvent["TaggedLoopEvent<br>= LoopEvent &<br>{ sessionId }"]
+    end
+
+    subgraph client ["@dcc/client"]
+        TrpcClient["tRPCクライアント<br>createTRPCReact&lt;AppRouter&gt;()"]
+    end
+
+    core -->|"import { Plan, ... }"| server
+    server -->|"export type AppRouter"| client
+    core -.->|"型はtRPC経由で<br>自動伝搬"| client
+
+    style core fill:#e8f5e9
+    style server fill:#e3f2fd
+    style client fill:#fff3e0
+```
+
+### SSE データフロー
+
+```mermaid
+sequenceDiagram
+    participant Loop as coach-loop<br>(@dcc/core)
+    participant Session as coach-session<br>(@dcc/server)
+    participant Bus as EventBus
+    participant Sub as tRPC subscription
+    participant UI as ブラウザ
+
+    Loop->>Session: onEvent({ kind: "advice", ... })
+    Session->>Bus: publish({ ...event, sessionId })
+    Session->>Session: INSERT INTO advices
+
+    Bus->>Sub: listener 呼び出し（sessionId フィルタ）
+    Sub-->>UI: SSE data: { kind: "advice", ... }
+    UI->>UI: useState で adviceHistory に追加
+
+    Note over Loop,UI: 5秒後、次のラウンドへ...
+```
+
+### DBスキーマ
+
+```mermaid
+erDiagram
+    sessions ||--o{ plans : "has"
+    sessions ||--o{ advices : "has"
+    plans ||--o{ advices : "references"
+
+    sessions {
+        TEXT id PK
+        TEXT goal
+        TEXT reference_image_path
+        TEXT display_id
+        TEXT display_name
+        TEXT started_at
+        TEXT ended_at "NULLなら進行中"
+    }
+
+    plans {
+        TEXT id PK
+        TEXT session_id FK
+        TEXT goal
+        TEXT reference_summary
+        TEXT steps "JSON: PlanStep[]"
+        TEXT created_at
+    }
+
+    advices {
+        TEXT id PK
+        TEXT session_id FK
+        TEXT plan_id FK "nullable"
+        INTEGER round_index
+        TEXT content
+        INTEGER timestamp_ms
+    }
+```
+
+### セットアップフローの変化
+
+| 項目 | CLI版（DCC-6） | GUI版（DCC-8） |
+|------|---------------|---------------|
+| ディスプレイ選択 | inquirer select | `<select>` ドロップダウン |
+| リファレンス画像 | パス手入力 | D&D / ファイル選択 + プレビュー |
+| 目標入力 | inquirer input | `<textarea>` |
+| プラン確認 | ターミナル表示 + Y/N | カード表示 + 承認/再生成ボタン |
+| アドバイス表示 | ターミナル出力 | ダッシュボード（リアルタイム） |
+| セッション履歴 | なし | SQLite永続化 + 一覧/復元UI |
+
+### CLI版との共存
+
+```text
+bun run start      → packages/cli/src/index.ts    → @dcc/core（既存動作を維持）
+bun run start:web  → packages/server/src/index.ts  → @dcc/core + Hono + tRPC + DB
+```
+
+コアロジック（`@dcc/core`）は両方から共有。CLI版は一切変更なし。
+
 ## 関連ドキュメント
 
 - [プロジェクト思想](./memory/README.md) — 「隣に座っている先輩デザイナー」の考え方
 - [ロードマップ](./roadmap/loadmap.md) — Phase 1-6 の開発計画
+- [DCC-8 実装プラン](./../.work/plan-DCC-8.md) — 詳細な実装ステップ

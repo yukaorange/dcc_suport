@@ -1,11 +1,11 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { buildAgentDefinitions } from "./agents";
 import { type CapturedImage, captureScreen } from "./capture";
 import type { CoachConfig } from "./config";
 import { computeDiff } from "./diff";
 import { checkSessionContinuity, type EngineResult, invokeClaude } from "./engine";
+import { COACH_TEMP_DIR } from "./paths";
 import type { Plan, PlanStepStatus } from "./planner";
 import { buildCoachSystemPrompt, buildCoachUserPrompt } from "./prompts";
 import { createToolPermissionGuard } from "./skills";
@@ -87,8 +87,7 @@ type LoopState = {
 
 const SILENT_MARKER = "__SILENT__";
 
-const TEMP_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".coach-tmp");
-const SCREENSHOT_PATH = join(TEMP_DIR, "current.png");
+const SCREENSHOT_PATH = join(COACH_TEMP_DIR, "current.png");
 
 type DiffCheckResult =
   | { readonly shouldInvoke: true }
@@ -154,7 +153,7 @@ function deriveNextState(
 }
 
 async function ensureTempDir(): Promise<void> {
-  await mkdir(TEMP_DIR, { recursive: true });
+  await mkdir(COACH_TEMP_DIR, { recursive: true });
 }
 
 async function saveScreenshot(pngBuffer: Buffer): Promise<string> {

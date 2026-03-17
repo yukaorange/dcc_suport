@@ -12,3 +12,5 @@ verify-report.md
 packages/core/src/verify/tmp/
 .coach-tmp/
 .claude/
+test-results/
+playwright-report/

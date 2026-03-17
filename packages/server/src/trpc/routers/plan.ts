@@ -19,13 +19,14 @@ export const planRouter = router({
     .mutation(async ({ input, ctx }) => {
       const log = createTaggedLogger("plan.generate");
       log.started();
+      log.info(`fileName=${input.referenceFileName}, base64Length=${input.referenceImageBase64.length}, goal="${input.goalDescription}"`);
 
       const imageResult = await saveBase64Image(
         input.referenceImageBase64,
         input.referenceFileName,
       );
       if (!imageResult.isOk) {
-        log.failed(imageResult.message);
+        log.failed(`saveBase64Image: ${imageResult.message}`);
         throw new TRPCError({ code: "BAD_REQUEST", message: imageResult.message });
       }
       log.info(`image saved: ${imageResult.filePath}`);
@@ -35,15 +36,17 @@ export const planRouter = router({
           ? ctx.pendingPlanCache.get(input.previousPlanId)?.plan
           : undefined;
 
+      log.info("calling generatePlan...");
       const planResult = await generatePlan({
         referenceImagePath: imageResult.filePath,
         goalDescription: input.goalDescription,
         revisionFeedback: input.revisionFeedback,
         previousPlan,
       });
+      log.info(`generatePlan result: isOk=${planResult.isOk}`);
 
       if (!planResult.isOk) {
-        log.failed(planResult.message);
+        log.failed(`generatePlan: ${planResult.message}`);
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: planResult.message });
       }
 

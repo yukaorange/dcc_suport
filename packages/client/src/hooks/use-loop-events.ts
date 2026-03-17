@@ -28,13 +28,13 @@ export function useLoopEvents(
   const [adviceHistory, setAdviceHistory] = useState<readonly Advice[]>(initialState.advices);
   const [isCoachingStopped, setIsCoachingStopped] = useState(initialState.isStopped);
 
-  // initialState の変更をstateに同期（DB hydration完了時 + sessionId切替時）
+  // sessionId 切替時のみ状態をリセット
+  // DashboardPage が data ロード完了後にのみマウントするため、
+  // useState の初期値で DB データは反映済み。以降は SSE が state を管理する。
   const prevSessionIdRef = useRef(sessionId);
-  const prevInitialStateRef = useRef(initialState);
 
-  if (prevSessionIdRef.current !== sessionId || prevInitialStateRef.current !== initialState) {
+  if (prevSessionIdRef.current !== sessionId) {
     prevSessionIdRef.current = sessionId;
-    prevInitialStateRef.current = initialState;
     setAdviceHistory(initialState.advices);
     setIsCoachingStopped(initialState.isStopped);
   }

@@ -10,6 +10,7 @@
     "includes": [
       "packages/**/*.ts",
       "packages/**/*.tsx",
+      "e2e/**/*.ts",
       "!**/drizzle.config.ts",
       "!**/vite.config.ts"
     ]

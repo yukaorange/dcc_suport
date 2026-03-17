@@ -16,7 +16,7 @@
   },
   "scripts": {
     "start": "bun run packages/cli/src/index.ts",
-    "dev": "bun run --filter '@dcc/server' dev & bun run --filter '@dcc/client' dev",
+    "dev": "bun run --filter '@dcc/server' --elide-lines=0 dev & bun run --filter '@dcc/client' --elide-lines=0 dev",
     "dev:cli": "bun --watch run packages/cli/src/index.ts",
     "start:web": "bun run packages/server/src/index.ts",
     "typecheck": "tsc -b",
@@ -25,6 +25,7 @@
     "test": "vitest run && bun test packages/server/test",
     "test:unit": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "check": "tsc -b && biome ci .",
     "verify": "bun run packages/core/src/verify/run-all.ts",
     "verify:streaming": "bun run packages/core/src/verify/verify-streaming.ts",
@@ -37,6 +38,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
+    "@playwright/test": "^1.58.2",
     "@types/bun": "latest",
     "screenshot-desktop": "catalog:",
     "sharp": "catalog:",

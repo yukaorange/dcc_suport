@@ -26,10 +26,15 @@ type StartOptions = {
   readonly plan: Plan | null;
 };
 
+type SubmitMessageResult =
+  | { readonly isOk: true }
+  | { readonly isOk: false; readonly reason: string };
+
 type CoachSessionHandle = {
   readonly getActiveSessionId: () => string | null;
   readonly start: (options: StartOptions) => Promise<void>;
   readonly stop: () => void;
+  readonly submitMessage: (sessionId: string, message: string) => SubmitMessageResult;
 };
 
 export type { CoachSessionHandle, StartOptions };
@@ -111,6 +116,14 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
             activeState = null;
           }
         });
+    },
+
+    submitMessage: (sessionId, message) => {
+      if (activeState === null || activeState.sessionId !== sessionId) {
+        return { isOk: false, reason: "アクティブなセッションが見つかりません" };
+      }
+      activeState.loop.submitMessage(message);
+      return { isOk: true };
     },
 
     stop: () => {

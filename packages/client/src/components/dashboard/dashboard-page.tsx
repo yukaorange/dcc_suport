@@ -6,6 +6,7 @@ import { useLoopEvents } from "../../hooks/use-loop-events";
 import { trpc } from "../../trpc";
 import { AdviceTimeline } from "./advice-timeline";
 import { LatestAdvice } from "./latest-advice";
+import { MessageInput } from "./message-input";
 import { PlanProgress } from "./plan-progress";
 
 type DashboardPageProps = {
@@ -62,6 +63,8 @@ function CoachingFeed({
       )}
 
       {children}
+
+      {!isCoachingStopped && <MessageInput sessionId={sessionId} />}
 
       <AdviceTimeline advices={adviceHistory} />
     </div>

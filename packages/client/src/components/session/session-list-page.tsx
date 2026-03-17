@@ -10,7 +10,8 @@ type SessionListPageProps = {
 };
 
 function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleString("ja-JP", {
+  const utcStr = dateStr.endsWith("Z") ? dateStr : `${dateStr}Z`;
+  return new Date(utcStr).toLocaleString("ja-JP", {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",

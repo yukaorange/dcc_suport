@@ -59,6 +59,22 @@ export const sessionRouter = router({
     };
   }),
 
+  sendMessage: publicProcedure
+    .input(z.object({ sessionId: z.string().uuid(), message: z.string().min(1).max(2000) }))
+    .mutation(({ input, ctx }) => {
+      const log = createTaggedLogger("session.sendMessage");
+      log.info(
+        `sessionId=${input.sessionId}, message="${input.message.slice(0, 50).replace(/[\r\n]/g, " ")}"`,
+      );
+
+      const result = ctx.coachSession.submitMessage(input.sessionId, input.message);
+      if (!result.isOk) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });
+      }
+
+      return { success: true };
+    }),
+
   restore: publicProcedure.input(z.object({ id: z.string() })).mutation(async ({ input, ctx }) => {
     const log = createTaggedLogger("session.restore");
     log.started();

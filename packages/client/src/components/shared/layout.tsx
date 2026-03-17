@@ -15,13 +15,13 @@ export function Layout({
 }: LayoutProps) {
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="flex items-center justify-between border-b px-6 py-3">
-        <h1 className="text-lg font-bold">DCC Coach</h1>
-        <nav className="flex gap-2">
+      <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-card px-6 py-3 shadow-sm">
+        <h1 className="text-lg font-bold tracking-tight">DCC Coach</h1>
+        <nav className="flex gap-1">
           {onNavigateToDashboard !== undefined && (
             <button
               type="button"
-              className="rounded px-3 py-1 text-sm font-medium text-primary hover:bg-accent"
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-primary hover:bg-accent transition-colors"
               onClick={onNavigateToDashboard}
             >
               Dashboard
@@ -30,7 +30,7 @@ export function Layout({
           {onNavigateToSetup !== undefined && (
             <button
               type="button"
-              className="rounded px-3 py-1 text-sm hover:bg-accent"
+              className="rounded-lg px-3 py-1.5 text-sm hover:bg-accent transition-colors"
               onClick={onNavigateToSetup}
             >
               Setup
@@ -39,7 +39,7 @@ export function Layout({
           {onNavigateToSessions !== undefined && (
             <button
               type="button"
-              className="rounded px-3 py-1 text-sm hover:bg-accent"
+              className="rounded-lg px-3 py-1.5 text-sm hover:bg-accent transition-colors"
               onClick={onNavigateToSessions}
             >
               Sessions
@@ -47,7 +47,7 @@ export function Layout({
           )}
         </nav>
       </header>
-      <main className="mx-auto max-w-4xl p-6">{children}</main>
+      <main className="mx-auto max-w-6xl p-6">{children}</main>
     </div>
   );
 }

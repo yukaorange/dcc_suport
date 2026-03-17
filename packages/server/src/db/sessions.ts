@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import type { DrizzleDb } from "./database";
-import { sessions } from "./schema";
+import { plans, sessions } from "./schema";
 
 type InsertSessionInput = {
   readonly id: string;
@@ -30,6 +30,21 @@ export function findSessionById(db: DrizzleDb, id: string) {
 
 export function listSessions(db: DrizzleDb) {
   return db.select().from(sessions).orderBy(sql`started_at DESC`).all();
+}
+
+export function listSessionsWithPlanSteps(db: DrizzleDb) {
+  return db
+    .select({
+      id: sessions.id,
+      goal: sessions.goal,
+      startedAt: sessions.startedAt,
+      endedAt: sessions.endedAt,
+      steps: plans.steps,
+    })
+    .from(sessions)
+    .leftJoin(plans, eq(plans.sessionId, sessions.id))
+    .orderBy(sql`${sessions.startedAt} DESC`)
+    .all();
 }
 
 export function endSession(db: DrizzleDb, id: string): void {

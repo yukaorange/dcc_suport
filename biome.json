@@ -7,7 +7,12 @@
     "defaultBranch": "main"
   },
   "files": {
-    "includes": ["packages/**/*.ts", "packages/**/*.tsx", "!**/drizzle.config.ts"]
+    "includes": [
+      "packages/**/*.ts",
+      "packages/**/*.tsx",
+      "!**/drizzle.config.ts",
+      "!**/vite.config.ts"
+    ]
   },
   "formatter": {
     "enabled": true,

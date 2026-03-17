@@ -29,10 +29,8 @@ export const debugRouter = router({
     };
   }),
 
-  log: publicProcedure
-    .input(z.object({ message: z.string() }))
-    .mutation(({ input }) => {
-      console.log("[debug.log]", input.message);
-      return { logged: true };
-    }),
+  log: publicProcedure.input(z.object({ message: z.string() })).mutation(({ input }) => {
+    console.log("[debug.log]", input.message);
+    return { logged: true };
+  }),
 });

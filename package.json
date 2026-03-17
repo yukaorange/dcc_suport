@@ -10,11 +10,14 @@
     "screenshot-desktop": "^1.15.3",
     "zod": "^3.25.0",
     "hono": "^4.7.0",
-    "@trpc/server": "^11.1.0"
+    "@trpc/server": "^11.1.0",
+    "@trpc/client": "^11.13.4",
+    "@trpc/react-query": "^11.13.4"
   },
   "scripts": {
     "start": "bun run packages/cli/src/index.ts",
-    "dev": "bun --watch run packages/cli/src/index.ts",
+    "dev": "bun run --filter '@dcc/server' dev & bun run --filter '@dcc/client' dev",
+    "dev:cli": "bun --watch run packages/cli/src/index.ts",
     "start:web": "bun run packages/server/src/index.ts",
     "typecheck": "tsc -b",
     "lint": "biome check .",

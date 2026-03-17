@@ -1,14 +1,19 @@
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defaultConfig, loadConfig } from "@dcc/core";
 import { createApp } from "./app";
-import { createCoachSession } from "./lib/coach-session";
 import { createDatabase } from "./db/database";
+import { createCoachSession } from "./lib/coach-session";
 import { createEventBus } from "./pure/event-bus";
 import { createPendingPlanCache } from "./pure/pending-plan-cache";
 import type { AppContext } from "./trpc/context";
 
+const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const PROJECT_ROOT = join(PACKAGE_ROOT, "..", "..");
+
 const PORT = 3456;
-const DB_PATH = "packages/server/sessions/dcc.sqlite";
-const CONFIG_PATH = "./config.json";
+const DB_PATH = join(PACKAGE_ROOT, "sessions", "dcc.sqlite");
+const CONFIG_PATH = join(PROJECT_ROOT, "config.json");
 
 const configResult = await loadConfig(CONFIG_PATH);
 const config = configResult.isOk ? configResult.config : defaultConfig;

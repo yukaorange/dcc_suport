@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { basename, extname, join, relative } from "node:path";
 
 const REFERENCE_DIR = join(process.cwd(), ".coach-tmp", "references");
 const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
@@ -10,19 +10,26 @@ const IMAGE_MAGIC_BYTES: Record<string, readonly number[]> = {
   ".jpeg": [0xff, 0xd8, 0xff],
   ".webp": [0x52, 0x49, 0x46, 0x46],
 };
+const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
 
 type SaveImageResult =
   | { readonly isOk: true; readonly filePath: string }
   | { readonly isOk: false; readonly message: string };
 
 function sanitizeFileName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100);
+  return basename(name)
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .slice(0, 100);
 }
 
 export async function saveBase64Image(base64: string, fileName: string): Promise<SaveImageResult> {
   const ext = extname(fileName).toLowerCase();
   if (!ALLOWED_EXTENSIONS.includes(ext)) {
     return { isOk: false, message: `対応していない画像形式: ${ext}` };
+  }
+
+  if (!BASE64_PATTERN.test(base64)) {
+    return { isOk: false, message: "不正なBase64形式です" };
   }
 
   const buffer = Buffer.from(base64, "base64");
@@ -42,6 +49,11 @@ export async function saveBase64Image(base64: string, fileName: string): Promise
   await mkdir(REFERENCE_DIR, { recursive: true });
   const sanitized = sanitizeFileName(fileName);
   const filePath = join(REFERENCE_DIR, `${crypto.randomUUID()}_${sanitized}`);
+
+  if (relative(REFERENCE_DIR, filePath) !== basename(filePath)) {
+    return { isOk: false, message: "不正なファイル名です" };
+  }
+
   await writeFile(filePath, buffer);
 
   return { isOk: true, filePath };

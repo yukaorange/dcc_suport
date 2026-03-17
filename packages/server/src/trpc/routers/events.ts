@@ -3,6 +3,8 @@ import { createTaggedLogger } from "../../lib/logger";
 import type { TaggedLoopEvent } from "../../pure/event-bus";
 import { publicProcedure, router } from "../trpc";
 
+const MAX_QUEUE_SIZE = 1000;
+
 export const eventsRouter = router({
   subscribe: publicProcedure
     .input(z.object({ sessionId: z.string() }))
@@ -15,6 +17,9 @@ export const eventsRouter = router({
 
       const unsubscribe = ctx.eventBus.subscribe((event) => {
         if (event.sessionId !== input.sessionId) return;
+        if (queue.length >= MAX_QUEUE_SIZE) {
+          queue.shift();
+        }
         queue.push(event);
         resolve?.();
       });

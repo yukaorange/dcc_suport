@@ -20,7 +20,9 @@ function createTaggedLogger(tag: string) {
       console.log(formatLog({ tag, message: "completed", durationMs: Date.now() - startMs }));
     },
     failed: (reason: string) => {
-      console.error(formatLog({ tag, message: `failed: ${reason}`, durationMs: Date.now() - startMs }));
+      console.error(
+        formatLog({ tag, message: `failed: ${reason}`, durationMs: Date.now() - startMs }),
+      );
     },
     info: (message: string) => {
       console.log(formatLog({ tag, message }));

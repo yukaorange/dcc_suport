@@ -3,10 +3,11 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { findAdvicesBySessionId } from "../../db/advices";
 import { findPlanBySessionId, insertPlan } from "../../db/plans";
-import { findSessionById, insertSession, listSessions } from "../../db/sessions";
+import { findSessionById, insertSession, listSessionsWithPlanSteps } from "../../db/sessions";
 import { createTaggedLogger } from "../../lib/logger";
 import { publicProcedure, router } from "../trpc";
 
+// @throws JSON.parse — steps カラムは内部で書き込んだJSONのため破損は想定外
 function parsePlanFromRow(row: { goal: string; referenceSummary: string; steps: string }): Plan {
   return {
     goal: row.goal,
@@ -15,19 +16,24 @@ function parsePlanFromRow(row: { goal: string; referenceSummary: string; steps: 
   };
 }
 
+// @throws JSON.parse — steps カラムは内部で書き込んだJSONのため破損は想定外
+function parseSteps(stepsJson: string | null): readonly PlanStep[] {
+  if (stepsJson === null) return [];
+  return JSON.parse(stepsJson) as PlanStep[];
+}
+
 export const sessionRouter = router({
   list: publicProcedure.query(({ ctx }) => {
     const log = createTaggedLogger("session.list");
     log.started();
 
-    const rows = listSessions(ctx.db);
+    const rows = listSessionsWithPlanSteps(ctx.db);
     log.info(`found ${rows.length} sessions`);
     log.completed();
 
     return {
       sessions: rows.map((row) => {
-        const planRow = findPlanBySessionId(ctx.db, row.id);
-        const steps: PlanStep[] = planRow ? (JSON.parse(planRow.steps) as PlanStep[]) : [];
+        const steps = parseSteps(row.steps);
         return {
           id: row.id,
           goal: row.goal,
@@ -82,6 +88,7 @@ export const sessionRouter = router({
     const plan = planRow ? parsePlanFromRow(planRow) : null;
 
     const newSessionId = crypto.randomUUID();
+    let newPlanId: string | null = null;
 
     insertSession(ctx.db, {
       id: newSessionId,
@@ -92,8 +99,9 @@ export const sessionRouter = router({
     });
 
     if (plan !== null && planRow !== null) {
+      newPlanId = crypto.randomUUID();
       insertPlan(ctx.db, {
-        id: crypto.randomUUID(),
+        id: newPlanId,
         sessionId: newSessionId,
         goal: plan.goal,
         referenceSummary: plan.referenceSummary,
@@ -105,7 +113,7 @@ export const sessionRouter = router({
 
     await ctx.coachSession.start({
       sessionId: newSessionId,
-      planId: planRow?.id ?? null,
+      planId: newPlanId,
       displayId: session.displayId,
       referenceImagePath: session.referenceImagePath,
       plan,

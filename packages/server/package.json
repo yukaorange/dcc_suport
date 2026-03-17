@@ -5,6 +5,9 @@
   "exports": {
     "./trpc": "./src/trpc/router.ts"
   },
+  "scripts": {
+    "dev": "bun --watch run src/index.ts"
+  },
   "dependencies": {
     "@dcc/core": "workspace:*",
     "@trpc/server": "catalog:",

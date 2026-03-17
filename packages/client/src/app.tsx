@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { DashboardPage } from "./components/dashboard/dashboard-page";
 import { SetupPage } from "./components/setup/setup-page";
 import { Layout } from "./components/shared/layout";
 
@@ -21,9 +22,10 @@ export function App() {
         </Layout>
       );
     case "coaching":
+      if (activeSessionId === null) return null;
       return (
         <Layout onNavigateToSessions={() => setPhase("sessions")}>
-          <p className="text-muted-foreground">Dashboard - session: {activeSessionId} (Step 7)</p>
+          <DashboardPage sessionId={activeSessionId} onBackToSetup={() => setPhase("setup")} />
         </Layout>
       );
     case "sessions":

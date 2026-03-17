@@ -26,7 +26,7 @@
     "test:unit": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "check": "tsc -b && biome ci .",
+    "check": "tsc -b && biome ci . && vitest run && bun test packages/server/test",
     "verify": "bun run packages/core/src/verify/run-all.ts",
     "verify:streaming": "bun run packages/core/src/verify/verify-streaming.ts",
     "verify:image": "bun run packages/core/src/verify/verify-image.ts",

@@ -2,8 +2,14 @@
   "name": "@dcc/server",
   "version": "0.0.1",
   "type": "module",
+  "exports": {
+    "./trpc": "./src/trpc/router.ts"
+  },
   "dependencies": {
-    "@dcc/core": "workspace:*"
+    "@dcc/core": "workspace:*",
+    "hono": "catalog:",
+    "@trpc/server": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/bun": "latest",

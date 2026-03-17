@@ -7,12 +7,15 @@
     "typescript": "^5.8.0",
     "@biomejs/biome": "^2.4.5",
     "sharp": "^0.34.5",
-    "screenshot-desktop": "^1.15.3"
+    "screenshot-desktop": "^1.15.3",
+    "zod": "^3.25.0",
+    "hono": "^4.7.0",
+    "@trpc/server": "^11.1.0"
   },
   "scripts": {
     "start": "bun run packages/cli/src/index.ts",
     "dev": "bun --watch run packages/cli/src/index.ts",
-    "start:web": "echo 'Not implemented yet. See Step 2 in .work/plan-DCC-8.md' && exit 1",
+    "start:web": "bun run packages/server/src/index.ts",
     "typecheck": "tsc -b",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",

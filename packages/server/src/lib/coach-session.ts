@@ -10,6 +10,7 @@ import { insertAdvice } from "../db/advices";
 import type { DrizzleDb } from "../db/database";
 import { updatePlanStepStatus } from "../db/plans";
 import { endSession } from "../db/sessions";
+import { createTaggedLogger } from "../lib/logger";
 import type { EventBus } from "../pure/event-bus";
 
 type CoachSessionDeps = {
@@ -52,40 +53,59 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
     getActiveSessionId: () => activeState?.sessionId ?? null,
 
     start: async (options) => {
+      const log = createTaggedLogger("coach-session");
+
       if (activeState !== null) {
+        log.info(`stopping previous session=${activeState.sessionId}`);
         activeState.abortController.abort();
-        // 前ループの一時ファイルクリーンアップを待つ（current.png の競合防止）
         await activeState.loop.loopFinished.catch((err: unknown) => {
-          console.warn("[coach-session] previous loop cleanup error:", err);
+          log.info(`previous loop cleanup error: ${String(err)}`);
         });
       }
+
+      log.info(
+        `starting session=${options.sessionId}, planId=${options.planId}, displayId=${options.displayId}`,
+      );
 
       const abortController = new AbortController();
 
       const applications = options.plan?.steps.map((s) => s.application) ?? [];
       const skillManifest = await loadSkillManifest(applications);
+      log.info(`skills loaded: ${skillManifest !== null ? "yes" : "none"}`);
 
       const onEvent = (event: LoopEvent) => {
         console.log(`[coach] ${JSON.stringify(event)}`);
-        deps.eventBus.publish({ ...event, sessionId: options.sessionId });
 
-        switch (event.kind) {
-          case "advice":
-            insertAdvice(deps.db, {
-              id: crypto.randomUUID(),
-              sessionId: options.sessionId,
-              planId: options.planId,
-              roundIndex: event.advice.roundIndex,
-              content: event.advice.content,
-              timestampMs: event.advice.timestampMs,
-            });
-            break;
-          case "plan_step_updated":
-            updatePlanStepStatus(deps.db, options.sessionId, event.stepIndex, event.newStatus);
-            break;
+        try {
+          deps.eventBus.publish({ ...event, sessionId: options.sessionId });
+        } catch (e) {
+          console.error("[coach-session] eventBus.publish failed:", e);
+        }
+
+        try {
+          switch (event.kind) {
+            case "advice":
+              insertAdvice(deps.db, {
+                id: crypto.randomUUID(),
+                sessionId: options.sessionId,
+                planId: options.planId,
+                roundIndex: event.advice.roundIndex,
+                content: event.advice.content,
+                timestampMs: event.advice.timestampMs,
+              });
+              log.info(`advice persisted (round=${event.advice.roundIndex})`);
+              break;
+            case "plan_step_updated":
+              updatePlanStepStatus(deps.db, options.sessionId, event.stepIndex, event.newStatus);
+              log.info(`step ${event.stepIndex} → ${event.newStatus}`);
+              break;
+          }
+        } catch (e) {
+          console.error("[coach-session] DB write failed:", e);
         }
       };
 
+      log.info("starting coach loop...");
       const loop = startCoachLoop({
         config: deps.config,
         signal: abortController.signal,
@@ -97,13 +117,16 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
       });
 
       activeState = { sessionId: options.sessionId, loop, abortController };
+      log.info("coach loop started");
 
       const mySessionId = options.sessionId;
       loop.loopFinished
         .then(() => {
+          log.info(`loop finished normally session=${mySessionId}`);
           deps.eventBus.publish({ kind: "stopped", sessionId: mySessionId });
         })
         .catch((err: unknown) => {
+          log.failed(`loop crashed session=${mySessionId}: ${String(err)}`);
           deps.eventBus.publish({
             kind: "engine_error",
             message: String(err),
@@ -111,6 +134,7 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
           });
         })
         .finally(() => {
+          log.info(`ending session=${mySessionId}`);
           endSession(deps.db, mySessionId);
           if (activeState?.sessionId === mySessionId) {
             activeState = null;
@@ -119,14 +143,19 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
     },
 
     submitMessage: (sessionId, message) => {
-      if (activeState === null || activeState.sessionId !== sessionId) {
+      const isActive = activeState !== null && activeState.sessionId === sessionId;
+      console.log(
+        `[coach-session] submitMessage session=${sessionId}, active=${isActive}, message="${message.slice(0, 50)}"`,
+      );
+      if (!isActive) {
         return { isOk: false, reason: "アクティブなセッションが見つかりません" };
       }
-      activeState.loop.submitMessage(message);
+      activeState?.loop.submitMessage(message);
       return { isOk: true };
     },
 
     stop: () => {
+      console.log(`[coach-session] stop requested, active=${activeState?.sessionId ?? "none"}`);
       activeState?.abortController.abort();
     },
   };

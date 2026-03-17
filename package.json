@@ -16,7 +16,7 @@
   },
   "scripts": {
     "start": "bun run packages/cli/src/index.ts",
-    "dev": "trap 'kill 0' EXIT; echo '\n  ➜  Client: http://localhost:5173/\n' && bun run --filter '@dcc/server' --elide-lines=0 dev & bun run --filter '@dcc/client' --elide-lines=0 dev & wait",
+    "dev": "concurrently -k -n server,client -c blue,green 'bun run --filter @dcc/server dev' 'bun run --filter @dcc/client dev'",
     "dev:cli": "bun --watch run packages/cli/src/index.ts",
     "start:web": "bun run packages/server/src/index.ts",
     "typecheck": "tsc -b",
@@ -40,6 +40,7 @@
     "@biomejs/biome": "catalog:",
     "@playwright/test": "^1.58.2",
     "@types/bun": "latest",
+    "concurrently": "^9.2.1",
     "screenshot-desktop": "catalog:",
     "sharp": "catalog:",
     "typescript": "catalog:",

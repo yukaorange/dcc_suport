@@ -1,7 +1,8 @@
+import { unlink } from "node:fs/promises";
 import type { Plan } from "@dcc/core";
 import type { DrizzleDb } from "../db/database";
 import { insertPlan } from "../db/plans";
-import { insertSession } from "../db/sessions";
+import { insertSession, purgeOldSessions } from "../db/sessions";
 import type { CoachSessionHandle } from "./coach-session";
 
 type StartSessionDeps = {
@@ -49,6 +50,19 @@ export async function startSession(
     displayId: params.displayId,
     referenceImagePath: params.referenceImagePath,
     plan: params.plan,
+  });
+
+  setImmediate(() => {
+    try {
+      const purged = purgeOldSessions(deps.db, sessionId);
+      for (const old of purged) {
+        unlink(old.referenceImagePath).catch((err: NodeJS.ErrnoException) => {
+          if (err.code !== "ENOENT") console.warn("[start-session] unlink failed:", err);
+        });
+      }
+    } catch (e) {
+      console.error("[start-session] purge failed:", e);
+    }
   });
 
   return { sessionId };

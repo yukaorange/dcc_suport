@@ -64,7 +64,7 @@ export const sessionRouter = router({
     .mutation(({ input, ctx }) => {
       const log = createTaggedLogger("session.sendMessage");
       log.info(
-        `sessionId=${input.sessionId}, message="${input.message.slice(0, 50).replace(/\n/g, " ")}"`,
+        `sessionId=${input.sessionId}, message="${input.message.slice(0, 50).replace(/[\r\n]/g, " ")}"`,
       );
 
       const result = ctx.coachSession.submitMessage(input.sessionId, input.message);

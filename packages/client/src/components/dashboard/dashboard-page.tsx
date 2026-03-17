@@ -45,14 +45,17 @@ function CoachingFeed({
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6 pb-24">
       <div className="flex items-center gap-3">
-        <h2 className="text-xl font-bold">ダッシュボード</h2>
-        <Badge variant={isCoachingStopped ? "secondary" : "default"}>
+        <h2 className="text-2xl font-bold tracking-tight">Dashboard</h2>
+        <Badge
+          variant={isCoachingStopped ? "secondary" : "default"}
+          className="rounded-full px-3 py-1"
+        >
           {isCoachingStopped ? "終了" : "コーチング中"}
         </Badge>
         {isCoachingStopped && (
-          <Button variant="outline" size="sm" onClick={onBackToSetup}>
+          <Button variant="outline" size="sm" className="ml-auto" onClick={onBackToSetup}>
             新規セットアップ
           </Button>
         )}
@@ -62,11 +65,14 @@ function CoachingFeed({
         <LatestAdvice content={latestAdvice.content} roundIndex={latestAdvice.roundIndex} />
       )}
 
-      {children}
-
       {!isCoachingStopped && <MessageInput sessionId={sessionId} />}
 
-      <AdviceTimeline advices={adviceHistory} />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+        <div className="lg:col-span-3">{children}</div>
+        <div className="lg:col-span-2">
+          <AdviceTimeline advices={adviceHistory} />
+        </div>
+      </div>
     </div>
   );
 }

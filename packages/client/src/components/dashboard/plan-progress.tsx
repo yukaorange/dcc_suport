@@ -32,23 +32,41 @@ function statusLabel(status: string): string {
 
 export function PlanProgress({ plan }: PlanProgressProps) {
   const completedCount = plan.steps.filter((s) => s.status === "completed").length;
+  const progressPercent = plan.steps.length > 0 ? (completedCount / plan.steps.length) * 100 : 0;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">
-          プラン進捗 ({completedCount}/{plan.steps.length})
-        </CardTitle>
+    <Card className="rounded-2xl shadow-sm">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-lg font-semibold">
+            プラン進捗 ({completedCount}/{plan.steps.length})
+          </CardTitle>
+          <span className="text-sm font-medium text-muted-foreground">
+            {Math.round(progressPercent)}%
+          </span>
+        </div>
+        <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-primary transition-all duration-500"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
       </CardHeader>
       <CardContent>
-        <ol className="space-y-2">
+        <ol className="space-y-3">
           {plan.steps.map((step) => (
-            <li key={`step-${step.index}`} className="flex items-center gap-2">
-              <Badge variant={statusVariant(step.status)} className="shrink-0 text-xs">
+            <li
+              key={`step-${step.index}`}
+              className="flex items-start gap-3 rounded-xl border p-3 transition-colors hover:bg-accent/30"
+            >
+              <Badge
+                variant={statusVariant(step.status)}
+                className="mt-0.5 shrink-0 rounded-full px-2.5 py-0.5 text-xs"
+              >
                 {statusLabel(step.status)}
               </Badge>
-              <span className="text-sm">{step.description}</span>
-              <Badge variant="outline" className="ml-auto shrink-0 text-xs">
+              <span className="flex-1 text-sm leading-relaxed">{step.description}</span>
+              <Badge variant="outline" className="shrink-0 rounded-full px-2.5 py-0.5 text-xs">
                 {step.application}
               </Badge>
             </li>

@@ -26,29 +26,31 @@ export function MessageInput({ sessionId }: MessageInputProps) {
   };
 
   return (
-    <div className="space-y-1">
-      <div className="flex gap-2">
+    <div className="fixed inset-x-0 bottom-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <div className="mx-auto flex max-w-6xl items-center gap-3 px-6 py-3">
         <Textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="コーチにメッセージを送る（⌘+Enter で送信）"
-          className="min-h-[44px] resize-none"
+          className="min-h-[40px] resize-none rounded-xl"
           rows={1}
           disabled={mutation.isPending}
         />
         <Button
           onClick={handleSubmit}
           disabled={message.trim().length === 0 || mutation.isPending}
-          className="shrink-0"
+          className="shrink-0 rounded-xl px-6"
         >
           送信
         </Button>
       </div>
       {mutation.error !== null && (
-        <p className="text-sm text-destructive">
-          メッセージの送信に失敗しました。コーチングセッションが終了している可能性があります。
-        </p>
+        <div className="mx-auto max-w-6xl px-6 pb-2">
+          <p className="text-sm text-destructive">
+            メッセージの送信に失敗しました。コーチングセッションが終了している可能性があります。
+          </p>
+        </div>
       )}
     </div>
   );

@@ -1,6 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 
 type Advice = {
   readonly content: string;
@@ -23,9 +22,9 @@ function formatTime(timestampMs: number): string {
 export function AdviceTimeline({ advices }: AdviceTimelineProps) {
   if (advices.length === 0) {
     return (
-      <Card>
+      <Card className="rounded-2xl shadow-sm">
         <CardHeader>
-          <CardTitle className="text-lg">アドバイス履歴</CardTitle>
+          <CardTitle className="text-lg font-semibold">アドバイス履歴</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">まだアドバイスがありません</p>
@@ -35,21 +34,25 @@ export function AdviceTimeline({ advices }: AdviceTimelineProps) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">アドバイス履歴 ({advices.length})</CardTitle>
+    <Card className="rounded-2xl shadow-sm">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-lg font-semibold">アドバイス履歴 ({advices.length})</CardTitle>
       </CardHeader>
       <CardContent>
-        <ScrollArea className="h-[400px]">
+        <ScrollArea className="h-[500px]">
           <div className="space-y-3 pr-4">
             {advices.map((advice) => (
-              <div key={`advice-${advice.roundIndex}-${advice.timestampMs}`}>
+              <div
+                key={`advice-${advice.roundIndex}-${advice.timestampMs}`}
+                className="rounded-xl border p-3 transition-colors hover:bg-accent/30"
+              >
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>Round {advice.roundIndex}</span>
+                  <span className="rounded-full bg-muted px-2 py-0.5 font-medium">
+                    Round {advice.roundIndex}
+                  </span>
                   <span>{formatTime(advice.timestampMs)}</span>
                 </div>
-                <p className="mt-1 whitespace-pre-wrap text-sm">{advice.content}</p>
-                <Separator className="mt-3" />
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">{advice.content}</p>
               </div>
             ))}
           </div>

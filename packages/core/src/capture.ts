@@ -34,6 +34,13 @@ function toErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+// macOSでは数値ID、Linux/Windowsでは文字列ID（"HDMI-1"等）が使われるため、
+// 数値に変換可能な場合のみ変換し、それ以外は文字列のまま渡す
+function toScreenParam(displayId: string): number | string {
+  const asNumber = Number(displayId);
+  return Number.isNaN(asNumber) ? displayId : asNumber;
+}
+
 export async function buildCapturedImage(
   pngBuffer: Buffer,
   maxWidthPx: number,
@@ -60,9 +67,8 @@ export async function buildCapturedImage(
 }
 
 export async function captureScreen(config: CaptureConfig): Promise<CaptureResult> {
-  const screenshotBuffer = await screenshot({ format: "png", screen: config.displayId }).catch(
-    (e: unknown) => e,
-  );
+  const screen = config.displayId !== undefined ? toScreenParam(config.displayId) : undefined;
+  const screenshotBuffer = await screenshot({ format: "png", screen }).catch((e: unknown) => e);
   if (!(screenshotBuffer instanceof Buffer)) {
     return {
       isOk: false,

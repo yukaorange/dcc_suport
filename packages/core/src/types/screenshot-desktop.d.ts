@@ -1,12 +1,12 @@
 declare module "screenshot-desktop" {
   type ScreenshotOptions = {
     readonly format?: "png" | "jpg";
-    readonly screen?: string;
+    readonly screen?: number | string;
     readonly filename?: string;
   };
 
   type Display = {
-    readonly id: string;
+    readonly id: number | string;
     readonly name: string;
   };
 

@@ -19,7 +19,9 @@ export const planRouter = router({
     .mutation(async ({ input, ctx }) => {
       const log = createTaggedLogger("plan.generate");
       log.started();
-      log.info(`fileName=${input.referenceFileName}, base64Length=${input.referenceImageBase64.length}, goal="${input.goalDescription}"`);
+      log.info(
+        `fileName=${input.referenceFileName}, base64Length=${input.referenceImageBase64.length}, goal="${input.goalDescription}"`,
+      );
 
       const imageResult = await saveBase64Image(
         input.referenceImageBase64,

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useLoopEvents } from "../../hooks/use-loop-events";
@@ -18,14 +19,33 @@ type DashboardPageProps = {
  */
 function CoachingFeed({
   sessionId,
+  initialAdvices,
+  initialStopped,
   onBackToSetup,
   children,
 }: {
   readonly sessionId: string;
+  readonly initialAdvices: readonly {
+    content: string;
+    roundIndex: number;
+    timestampMs: number;
+  }[];
+  readonly initialStopped: boolean;
   readonly onBackToSetup: () => void;
   readonly children: ReactNode;
 }) {
-  const { adviceHistory, latestAdvice, isCoachingStopped } = useLoopEvents(sessionId, true);
+  // 3PL (tRPC useSubscription) に渡すオブジェクトの参照安定性が必要
+  // biome-ignore lint/correctness/useExhaustiveDependencies: initialAdvices/initialStoppedの参照安定化
+  const initialState = useMemo(
+    () => ({ advices: initialAdvices, isStopped: initialStopped }),
+    [sessionId],
+  );
+
+  const { adviceHistory, latestAdvice, isCoachingStopped } = useLoopEvents(
+    sessionId,
+    !initialStopped,
+    initialState,
+  );
 
   return (
     <div className="space-y-4">
@@ -55,8 +75,16 @@ function CoachingFeed({
 export function DashboardPage({ sessionId, onBackToSetup }: DashboardPageProps) {
   const { data } = trpc.session.get.useQuery({ id: sessionId });
 
+  const initialAdvices = data?.advices ?? [];
+  const initialStopped = data?.session.endedAt !== null && data?.session.endedAt !== undefined;
+
   return (
-    <CoachingFeed sessionId={sessionId} onBackToSetup={onBackToSetup}>
+    <CoachingFeed
+      sessionId={sessionId}
+      initialAdvices={initialAdvices}
+      initialStopped={initialStopped}
+      onBackToSetup={onBackToSetup}
+    >
       {data?.plan !== null && data?.plan !== undefined && <PlanProgress plan={data.plan} />}
     </CoachingFeed>
   );

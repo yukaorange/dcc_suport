@@ -14,10 +14,15 @@ export function App() {
     setPhase("coaching");
   };
 
+  const hasActiveSession = activeSessionId !== null;
+
   switch (phase) {
     case "setup":
       return (
-        <Layout onNavigateToSessions={() => setPhase("sessions")}>
+        <Layout
+          onNavigateToSessions={() => setPhase("sessions")}
+          onNavigateToDashboard={hasActiveSession ? () => setPhase("coaching") : undefined}
+        >
           <SetupPage onCoachingStarted={handleCoachingStarted} />
         </Layout>
       );
@@ -30,7 +35,10 @@ export function App() {
       );
     case "sessions":
       return (
-        <Layout onNavigateToSetup={() => setPhase("setup")}>
+        <Layout
+          onNavigateToSetup={() => setPhase("setup")}
+          onNavigateToDashboard={hasActiveSession ? () => setPhase("coaching") : undefined}
+        >
           <p className="text-muted-foreground">Session List (Step 8)</p>
         </Layout>
       );

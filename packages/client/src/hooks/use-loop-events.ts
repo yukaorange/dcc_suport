@@ -7,22 +7,31 @@ type Advice = {
   readonly timestampMs: number;
 };
 
+type InitialState = {
+  readonly advices: readonly Advice[];
+  readonly isStopped: boolean;
+};
+
 type LoopEventsResult = {
   readonly adviceHistory: readonly Advice[];
   readonly latestAdvice: Advice | null;
   readonly isCoachingStopped: boolean;
 };
 
-export function useLoopEvents(sessionId: string, isEnabled: boolean): LoopEventsResult {
-  const [adviceHistory, setAdviceHistory] = useState<readonly Advice[]>([]);
-  const [isCoachingStopped, setIsCoachingStopped] = useState(false);
+export function useLoopEvents(
+  sessionId: string,
+  isEnabled: boolean,
+  initialState: InitialState,
+): LoopEventsResult {
+  const [adviceHistory, setAdviceHistory] = useState<readonly Advice[]>(initialState.advices);
+  const [isCoachingStopped, setIsCoachingStopped] = useState(initialState.isStopped);
 
-  // sessionId変更時に状態リセット（SSE外部接続に伴う初期化のためuseEffect使用）
+  // sessionId or initialState変更時に状態を同期（SSE外部接続に伴う初期化のためuseEffect使用）
   // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId変更時にリセットが必要
   useEffect(() => {
-    setAdviceHistory([]);
-    setIsCoachingStopped(false);
-  }, [sessionId]);
+    setAdviceHistory(initialState.advices);
+    setIsCoachingStopped(initialState.isStopped);
+  }, [sessionId, initialState]);
 
   trpc.events.subscribe.useSubscription(
     { sessionId },

@@ -8,12 +8,18 @@ const MAX_QUEUE_SIZE = 1000;
 export const eventsRouter = router({
   subscribe: publicProcedure
     .input(z.object({ sessionId: z.string() }))
-    .subscription(async function* ({ input, ctx }) {
+    .subscription(async function* ({ input, ctx, signal }) {
       const log = createTaggedLogger("events.subscribe");
       log.info(`connected sessionId=${input.sessionId}`);
 
       const queue: TaggedLoopEvent[] = [];
       let resolve: (() => void) | null = null;
+      let aborted = false;
+
+      signal?.addEventListener("abort", () => {
+        aborted = true;
+        resolve?.();
+      });
 
       const unsubscribe = ctx.eventBus.subscribe((event) => {
         if (event.sessionId !== input.sessionId) return;
@@ -25,7 +31,7 @@ export const eventsRouter = router({
       });
 
       try {
-        while (true) {
+        while (!aborted) {
           if (queue.length === 0) {
             await new Promise<void>((r) => {
               resolve = r;

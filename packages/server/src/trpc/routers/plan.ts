@@ -9,7 +9,7 @@ export const planRouter = router({
   generate: publicProcedure
     .input(
       z.object({
-        referenceImageBase64: z.string(),
+        referenceImageBase64: z.string().max(14 * 1024 * 1024),
         referenceFileName: z.string(),
         goalDescription: z.string().min(5),
         revisionFeedback: z.string().optional(),

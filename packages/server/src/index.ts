@@ -16,6 +16,9 @@ const DB_PATH = join(PACKAGE_ROOT, "sessions", "dcc.sqlite");
 const CONFIG_PATH = join(PROJECT_ROOT, "config.json");
 
 const configResult = await loadConfig(CONFIG_PATH);
+if (!configResult.isOk) {
+  console.warn(`[config] failed to load, using defaults: ${configResult.message}`);
+}
 const config = configResult.isOk ? configResult.config : defaultConfig;
 
 const db = createDatabase(DB_PATH);

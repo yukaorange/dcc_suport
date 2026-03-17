@@ -1,8 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { insertPlan } from "../../db/plans";
-import { insertSession } from "../../db/sessions";
 import { createTaggedLogger } from "../../lib/logger";
+import { startSession } from "../../lib/start-session";
 import { publicProcedure, router } from "../trpc";
 
 export const setupRouter = router({
@@ -10,6 +9,7 @@ export const setupRouter = router({
     .input(
       z.object({
         displayId: z.string(),
+        displayName: z.string(),
         planId: z.string(),
       }),
     )
@@ -26,37 +26,21 @@ export const setupRouter = router({
         });
       }
 
-      const sessionId = crypto.randomUUID();
-      const dbPlanId = crypto.randomUUID();
-
-      insertSession(ctx.db, {
-        id: sessionId,
-        goal: cached.goalDescription,
-        referenceImagePath: cached.referenceImagePath,
-        displayId: input.displayId,
-        displayName: "",
-      });
-
-      insertPlan(ctx.db, {
-        id: dbPlanId,
-        sessionId,
-        goal: cached.plan.goal,
-        referenceSummary: cached.plan.referenceSummary,
-        steps: cached.plan.steps,
-      });
-
       ctx.pendingPlanCache.delete(input.planId);
-      log.info(`session=${sessionId}, plan=${dbPlanId}`);
 
-      await ctx.coachSession.start({
-        sessionId,
-        planId: dbPlanId,
-        displayId: input.displayId,
-        referenceImagePath: cached.referenceImagePath,
-        plan: cached.plan,
-      });
+      const result = await startSession(
+        { db: ctx.db, coachSession: ctx.coachSession },
+        {
+          goal: cached.goalDescription,
+          referenceImagePath: cached.referenceImagePath,
+          displayId: input.displayId,
+          displayName: input.displayName,
+          plan: cached.plan,
+        },
+      );
 
+      log.info(`session=${result.sessionId}`);
       log.completed();
-      return { sessionId };
+      return { sessionId: result.sessionId };
     }),
 });

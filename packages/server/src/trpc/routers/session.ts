@@ -1,26 +1,11 @@
-import type { Plan, PlanStep } from "@dcc/core";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { findAdvicesBySessionId } from "../../db/advices";
-import { findPlanBySessionId, insertPlan } from "../../db/plans";
-import { findSessionById, insertSession, listSessionsWithPlanSteps } from "../../db/sessions";
+import { findPlanBySessionId, parsePlanRow, parseStepsJson } from "../../db/plans";
+import { findSessionById, listSessionsWithPlanSteps } from "../../db/sessions";
 import { createTaggedLogger } from "../../lib/logger";
+import { startSession } from "../../lib/start-session";
 import { publicProcedure, router } from "../trpc";
-
-// @throws JSON.parse — steps カラムは内部で書き込んだJSONのため破損は想定外
-function parsePlanFromRow(row: { goal: string; referenceSummary: string; steps: string }): Plan {
-  return {
-    goal: row.goal,
-    referenceSummary: row.referenceSummary,
-    steps: JSON.parse(row.steps) as PlanStep[],
-  };
-}
-
-// @throws JSON.parse — steps カラムは内部で書き込んだJSONのため破損は想定外
-function parseSteps(stepsJson: string | null): readonly PlanStep[] {
-  if (stepsJson === null) return [];
-  return JSON.parse(stepsJson) as PlanStep[];
-}
 
 export const sessionRouter = router({
   list: publicProcedure.query(({ ctx }) => {
@@ -33,7 +18,7 @@ export const sessionRouter = router({
 
     return {
       sessions: rows.map((row) => {
-        const steps = parseSteps(row.steps);
+        const steps = parseStepsJson(row.steps);
         return {
           id: row.id,
           goal: row.goal,
@@ -57,7 +42,7 @@ export const sessionRouter = router({
     }
 
     const planRow = findPlanBySessionId(ctx.db, input.id);
-    const plan = planRow ? parsePlanFromRow(planRow) : null;
+    const plan = planRow ? parsePlanRow(planRow) : null;
     const adviceRows = findAdvicesBySessionId(ctx.db, input.id);
 
     log.info(`advices=${adviceRows.length}, hasPlan=${plan !== null}`);
@@ -85,41 +70,21 @@ export const sessionRouter = router({
     }
 
     const planRow = findPlanBySessionId(ctx.db, input.id);
-    const plan = planRow ? parsePlanFromRow(planRow) : null;
+    const plan = planRow ? parsePlanRow(planRow) : null;
 
-    const newSessionId = crypto.randomUUID();
-    let newPlanId: string | null = null;
+    const result = await startSession(
+      { db: ctx.db, coachSession: ctx.coachSession },
+      {
+        goal: session.goal,
+        referenceImagePath: session.referenceImagePath,
+        displayId: session.displayId,
+        displayName: session.displayName,
+        plan,
+      },
+    );
 
-    insertSession(ctx.db, {
-      id: newSessionId,
-      goal: session.goal,
-      referenceImagePath: session.referenceImagePath,
-      displayId: session.displayId,
-      displayName: session.displayName,
-    });
-
-    if (plan !== null && planRow !== null) {
-      newPlanId = crypto.randomUUID();
-      insertPlan(ctx.db, {
-        id: newPlanId,
-        sessionId: newSessionId,
-        goal: plan.goal,
-        referenceSummary: plan.referenceSummary,
-        steps: plan.steps,
-      });
-    }
-
-    log.info(`restored as newSession=${newSessionId}`);
-
-    await ctx.coachSession.start({
-      sessionId: newSessionId,
-      planId: newPlanId,
-      displayId: session.displayId,
-      referenceImagePath: session.referenceImagePath,
-      plan,
-    });
-
+    log.info(`restored as newSession=${result.sessionId}`);
     log.completed();
-    return { sessionId: newSessionId };
+    return { sessionId: result.sessionId };
   }),
 });

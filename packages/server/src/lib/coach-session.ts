@@ -33,25 +33,28 @@ type CoachSessionHandle = {
 
 export type { CoachSessionHandle, StartOptions };
 
+type ActiveState = {
+  readonly sessionId: string;
+  readonly loop: CoachLoopHandle;
+  readonly abortController: AbortController;
+};
+
 export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
-  let activeSessionId: string | null = null;
-  let activeLoop: CoachLoopHandle | null = null;
-  let abortController: AbortController | null = null;
+  let activeState: ActiveState | null = null;
 
   return {
-    getActiveSessionId: () => activeSessionId,
+    getActiveSessionId: () => activeState?.sessionId ?? null,
 
     start: async (options) => {
-      if (abortController !== null) {
-        abortController.abort();
+      if (activeState !== null) {
+        activeState.abortController.abort();
         // 前ループの一時ファイルクリーンアップを待つ（current.png の競合防止）
-        if (activeLoop !== null) {
-          await activeLoop.loopFinished.catch(() => {});
-        }
+        await activeState.loop.loopFinished.catch((err: unknown) => {
+          console.warn("[coach-session] previous loop cleanup error:", err);
+        });
       }
 
-      activeSessionId = options.sessionId;
-      abortController = new AbortController();
+      const abortController = new AbortController();
 
       const applications = options.plan?.steps.map((s) => s.application) ?? [];
       const skillManifest = await loadSkillManifest(applications);
@@ -73,7 +76,7 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
         }
       };
 
-      activeLoop = startCoachLoop({
+      const loop = startCoachLoop({
         config: deps.config,
         signal: abortController.signal,
         onEvent,
@@ -83,8 +86,10 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
         skillManifest,
       });
 
+      activeState = { sessionId: options.sessionId, loop, abortController };
+
       const mySessionId = options.sessionId;
-      activeLoop.loopFinished
+      loop.loopFinished
         .then(() => {
           deps.eventBus.publish({ kind: "stopped", sessionId: mySessionId });
         })
@@ -97,15 +102,14 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
         })
         .finally(() => {
           endSession(deps.db, mySessionId);
-          if (activeSessionId === mySessionId) {
-            activeSessionId = null;
-            activeLoop = null;
+          if (activeState?.sessionId === mySessionId) {
+            activeState = null;
           }
         });
     },
 
     stop: () => {
-      abortController?.abort();
+      activeState?.abortController.abort();
     },
   };
 }

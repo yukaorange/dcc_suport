@@ -1,4 +1,4 @@
-import type { PlanStep } from "@dcc/core";
+import type { Plan, PlanStep } from "@dcc/core";
 import { eq, sql } from "drizzle-orm";
 import type { DrizzleDb } from "./database";
 import { plans } from "./schema";
@@ -12,6 +12,21 @@ type InsertPlanInput = {
 };
 
 export type { InsertPlanInput };
+
+// @throws JSON.parse — steps カラムは内部で書き込んだJSONのため破損は想定外
+export function parsePlanRow(row: { goal: string; referenceSummary: string; steps: string }): Plan {
+  return {
+    goal: row.goal,
+    referenceSummary: row.referenceSummary,
+    steps: JSON.parse(row.steps) as PlanStep[],
+  };
+}
+
+// @throws JSON.parse — steps カラムは内部で書き込んだJSONのため破損は想定外
+export function parseStepsJson(stepsJson: string | null): readonly PlanStep[] {
+  if (stepsJson === null) return [];
+  return JSON.parse(stepsJson) as PlanStep[];
+}
 
 export function insertPlan(db: DrizzleDb, input: InsertPlanInput): void {
   db.insert(plans)

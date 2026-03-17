@@ -34,7 +34,7 @@ packages/server/src/
 │
 ├── lib/
 │   ├── coach-session.ts  ← [最重要] コーチングループのライフサイクル管理
-│   ├── start-session.ts  ← セッション開始の共通ワークフロー
+│   ├── start-session.ts  ← [重要] セッション開始の共通ワークフロー（setup/restore両方が使用）
 │   ├── image-store.ts    ← Base64画像のバリデーション・保存
 │   └── logger.ts         ← タグ付きログユーティリティ
 │
@@ -88,16 +88,39 @@ graph TD
     CTX --> CS["coachSession: CoachSessionHandle"]
     CTX --> PPC["pendingPlanCache: PendingPlanCache"]
 
-    R1["plan.ts"] -.->|ctx.pendingPlanCache| CTX
-    R2["setup.ts"] -.->|ctx.db, ctx.coachSession| CTX
-    R3["session.ts"] -.->|ctx.db, ctx.coachSession| CTX
-    R4["events.ts"] -.->|ctx.eventBus| CTX
-    R5["display.ts"] -.->|引数なし| CTX
+    R1["plan.ts"] -.->|"ctx.pendingPlanCache\n(生成結果の保存 + 再生成時の前回プラン取得)"| CTX
+    R2["setup.ts"] -.->|"ctx.pendingPlanCache, ctx.db,\nctx.coachSession"| CTX
+    R3["session.ts"] -.->|"ctx.db, ctx.coachSession"| CTX
+    R4["events.ts"] -.->|"ctx.eventBus"| CTX
+    R5["display.ts"] -.->|"引数なし（core直接呼出）"| CTX
 
     style CTX fill:#e1f5fe
 ```
 
 `index.ts` で1回だけ生成され、全リクエストで共有されるシングルトン群。
+
+## PendingPlanCache の役割
+
+DBに書き込む前のプランを一時保持するインメモリキャッシュ。2つの場面で使われる:
+
+```mermaid
+flowchart TD
+    subgraph "1. プラン生成→セッション開始の橋渡し"
+        A["plan.generate"] -->|"cache.set(planId, { plan, imagePath, goal })"| C["PendingPlanCache"]
+        C -->|"cache.get(planId)"| B["setup.start"]
+        B -->|"cache.delete(planId)"| C
+    end
+
+    subgraph "2. プラン再生成時の前回プラン参照"
+        D["plan.generate\n(revisionFeedback付き)"] -->|"cache.get(previousPlanId)"| C
+        C -->|"previousPlan"| D
+    end
+
+    style C fill:#fff3e0
+```
+
+- TTL 30分で自動evict（ユーザーが放置した場合のメモリリーク防止）
+- DBには `setup.start` が呼ばれた時点で初めて書き込まれる
 
 ## メインフロー1: プラン生成 → セッション開始
 
@@ -124,6 +147,14 @@ sequenceDiagram
     Core-->>P: { plan }
     P->>Cache: cache.set(planId, { plan, imagePath, goal })
     P-->>C: { planId, plan }
+
+    Note over C,P: Phase 1.5: プラン再生成（任意）
+    C->>P: plan.generate({ ..., feedback, previousPlanId })
+    P->>Cache: cache.get(previousPlanId) → previousPlan
+    P->>Core: generatePlan({ ..., revisionFeedback, previousPlan })
+    Core-->>P: { plan }
+    P->>Cache: cache.set(newPlanId, { plan, ... })
+    P-->>C: { newPlanId, plan }
 
     Note over C,S: Phase 2: セッション開始
     C->>S: setup.start({ displayId, displayName, planId })
@@ -181,12 +212,14 @@ flowchart LR
     EV -->|"yield event"| SSE
 
     CL -->|"loopFinished"| CS
-    CS -->|"stopped / error"| EB
+    CS -->|"stopped / error を後付けで publish"| EB
     CS --> SESS
 
     style EB fill:#fff3e0
     style CS fill:#e8f5e9
 ```
+
+> **注意**: `stopped` イベントは core の coach-loop が発火するのではなく、server の `coach-session.ts` が `loopFinished` Promise 解決後に EventBus へ publish する。
 
 **読むべきファイル**: `lib/coach-session.ts`（イベントハンドラ部分）→ `pure/event-bus.ts` → `trpc/routers/events.ts`
 
@@ -210,6 +243,8 @@ sequenceDiagram
     SS-->>SR: { sessionId }
     SR-->>C: { sessionId }
 ```
+
+`start-session.ts` は `setup.start` と `session.restore` の**両方**が使用する共通ワークフロー。DB永続化 → ループ起動の接続点。
 
 ## DBスキーマ
 
@@ -269,8 +304,9 @@ stateDiagram-v2
 1. **`index.ts`** — 起動で何が組み立てられるか
 2. **`trpc/context.ts`** — 全ルーターに何が渡されるか
 3. **`trpc/routers/plan.ts` → `setup.ts`** — メインのユーザーフロー
-4. **`lib/coach-session.ts`** — ループ管理の仕組み
-5. **`trpc/routers/events.ts` + `pure/event-bus.ts`** — SSEの仕組み
-6. **`db/schema.ts`** — テーブル構造
+4. **`lib/start-session.ts`** — setup/restore の共通パス。DB永続化とループ起動の接続点
+5. **`lib/coach-session.ts`** — ループ管理の仕組み
+6. **`trpc/routers/events.ts` + `pure/event-bus.ts`** — SSEの仕組み
+7. **`db/schema.ts`** — テーブル構造
 
 `lib/image-store.ts`, `lib/logger.ts`, `pure/pending-plan-cache.ts`, `db/sessions.ts` 等は必要なときに参照すれば十分。

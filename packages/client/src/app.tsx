@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { DashboardPage } from "./components/dashboard/dashboard-page";
+import { SessionListPage } from "./components/session/session-list-page";
 import { SetupPage } from "./components/setup/setup-page";
 import { Layout } from "./components/shared/layout";
 
@@ -39,7 +40,7 @@ export function App() {
           onNavigateToSetup={() => setPhase("setup")}
           onNavigateToDashboard={hasActiveSession ? () => setPhase("coaching") : undefined}
         >
-          <p className="text-muted-foreground">Session List (Step 8)</p>
+          <SessionListPage onRestore={handleCoachingStarted} />
         </Layout>
       );
   }

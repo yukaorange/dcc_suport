@@ -1,5 +1,5 @@
+import type { PlanStepStatus } from "@dcc/core";
 import type { ReactNode } from "react";
-import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useLoopEvents } from "../../hooks/use-loop-events";
@@ -22,6 +22,7 @@ function CoachingFeed({
   initialAdvices,
   initialStopped,
   onBackToSetup,
+  onPlanStepUpdated,
   children,
 }: {
   readonly sessionId: string;
@@ -32,19 +33,14 @@ function CoachingFeed({
   }[];
   readonly initialStopped: boolean;
   readonly onBackToSetup: () => void;
+  readonly onPlanStepUpdated: (stepIndex: number, newStatus: PlanStepStatus) => void;
   readonly children: ReactNode;
 }) {
-  // 3PL (tRPC useSubscription) に渡すオブジェクトの参照安定性が必要
-  // biome-ignore lint/correctness/useExhaustiveDependencies: initialAdvices/initialStoppedの参照安定化
-  const initialState = useMemo(
-    () => ({ advices: initialAdvices, isStopped: initialStopped }),
-    [sessionId],
-  );
-
   const { adviceHistory, latestAdvice, isCoachingStopped } = useLoopEvents(
     sessionId,
     !initialStopped,
-    initialState,
+    { advices: initialAdvices, isStopped: initialStopped },
+    onPlanStepUpdated,
   );
 
   return (
@@ -74,9 +70,30 @@ function CoachingFeed({
 
 export function DashboardPage({ sessionId, onBackToSetup }: DashboardPageProps) {
   const { data } = trpc.session.get.useQuery({ id: sessionId });
+  const utils = trpc.useUtils();
 
+  const isDataLoaded = data !== undefined;
   const initialAdvices = data?.advices ?? [];
   const initialStopped = data?.session.endedAt !== null && data?.session.endedAt !== undefined;
+
+  const handlePlanStepUpdated = (stepIndex: number, newStatus: PlanStepStatus) => {
+    utils.session.get.setData({ id: sessionId }, (prev) => {
+      if (prev?.plan === null || prev?.plan === undefined) return prev;
+      return {
+        ...prev,
+        plan: {
+          ...prev.plan,
+          steps: prev.plan.steps.map((step) =>
+            step.index === stepIndex ? { ...step, status: newStatus } : step,
+          ),
+        },
+      };
+    });
+  };
+
+  if (!isDataLoaded) {
+    return <p className="text-sm text-muted-foreground">読み込み中...</p>;
+  }
 
   return (
     <CoachingFeed
@@ -84,8 +101,9 @@ export function DashboardPage({ sessionId, onBackToSetup }: DashboardPageProps) 
       initialAdvices={initialAdvices}
       initialStopped={initialStopped}
       onBackToSetup={onBackToSetup}
+      onPlanStepUpdated={handlePlanStepUpdated}
     >
-      {data?.plan !== null && data?.plan !== undefined && <PlanProgress plan={data.plan} />}
+      {data.plan !== null && data.plan !== undefined && <PlanProgress plan={data.plan} />}
     </CoachingFeed>
   );
 }

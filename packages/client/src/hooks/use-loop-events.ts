@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import type { PlanStepStatus } from "@dcc/core";
+import { useEffect, useRef, useState } from "react";
 import { trpc } from "../trpc";
 
 type Advice = {
@@ -22,16 +23,27 @@ export function useLoopEvents(
   sessionId: string,
   isEnabled: boolean,
   initialState: InitialState,
+  onPlanStepUpdated?: (stepIndex: number, newStatus: PlanStepStatus) => void,
 ): LoopEventsResult {
   const [adviceHistory, setAdviceHistory] = useState<readonly Advice[]>(initialState.advices);
   const [isCoachingStopped, setIsCoachingStopped] = useState(initialState.isStopped);
 
-  // sessionId or initialState変更時に状態を同期（SSE外部接続に伴う初期化のためuseEffect使用）
-  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId変更時にリセットが必要
-  useEffect(() => {
+  // initialState の変更をstateに同期（DB hydration完了時 + sessionId切替時）
+  const prevSessionIdRef = useRef(sessionId);
+  const prevInitialStateRef = useRef(initialState);
+
+  if (prevSessionIdRef.current !== sessionId || prevInitialStateRef.current !== initialState) {
+    prevSessionIdRef.current = sessionId;
+    prevInitialStateRef.current = initialState;
     setAdviceHistory(initialState.advices);
     setIsCoachingStopped(initialState.isStopped);
-  }, [sessionId, initialState]);
+  }
+
+  // onPlanStepUpdated の最新参照を保持（SSE コールバック内で使うため）
+  const onPlanStepUpdatedRef = useRef(onPlanStepUpdated);
+  useEffect(() => {
+    onPlanStepUpdatedRef.current = onPlanStepUpdated;
+  });
 
   trpc.events.subscribe.useSubscription(
     { sessionId },
@@ -41,6 +53,9 @@ export function useLoopEvents(
         switch (event.kind) {
           case "advice":
             setAdviceHistory((prev) => [...prev, event.advice]);
+            break;
+          case "plan_step_updated":
+            onPlanStepUpdatedRef.current?.(event.stepIndex, event.newStatus);
             break;
           case "stopped":
             setIsCoachingStopped(true);

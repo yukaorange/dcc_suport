@@ -8,6 +8,7 @@ import {
 } from "@dcc/core";
 import { insertAdvice } from "../db/advices";
 import type { DrizzleDb } from "../db/database";
+import { updatePlanStepStatus } from "../db/plans";
 import { endSession } from "../db/sessions";
 import type { EventBus } from "../pure/event-bus";
 
@@ -72,6 +73,9 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
               content: event.advice.content,
               timestampMs: event.advice.timestampMs,
             });
+            break;
+          case "plan_step_updated":
+            updatePlanStepStatus(deps.db, options.sessionId, event.stepIndex, event.newStatus);
             break;
         }
       };

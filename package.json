@@ -16,7 +16,7 @@
   },
   "scripts": {
     "start": "bun run packages/cli/src/index.ts",
-    "dev": "bun run --filter '@dcc/server' --elide-lines=0 dev & bun run --filter '@dcc/client' --elide-lines=0 dev",
+    "dev": "bun run --filter '@dcc/server' --elide-lines=0 dev & bun run --filter '@dcc/client' --elide-lines=0 dev & echo '\n  ➜  Client: http://localhost:5173/\n'",
     "dev:cli": "bun --watch run packages/cli/src/index.ts",
     "start:web": "bun run packages/server/src/index.ts",
     "typecheck": "tsc -b",

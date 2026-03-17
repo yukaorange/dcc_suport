@@ -60,7 +60,8 @@ export async function buildCapturedImage(
 }
 
 export async function captureScreen(config: CaptureConfig): Promise<CaptureResult> {
-  const screenshotBuffer = await screenshot({ format: "png", screen: config.displayId }).catch(
+  const screen = config.displayId !== undefined ? Number(config.displayId) : undefined;
+  const screenshotBuffer = await screenshot({ format: "png", screen }).catch(
     (e: unknown) => e,
   );
   if (!(screenshotBuffer instanceof Buffer)) {

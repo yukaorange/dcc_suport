@@ -29,5 +29,9 @@ export async function listDisplays(): Promise<ListDisplaysResult> {
       message: toErrorMessage(displays),
     };
   }
-  return { isOk: true, displays };
+  const normalized: DisplayInfo[] = displays.map((d) => ({
+    id: String(d.id),
+    name: String(d.name),
+  }));
+  return { isOk: true, displays: normalized };
 }

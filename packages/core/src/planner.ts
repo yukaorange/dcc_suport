@@ -57,7 +57,7 @@ ${JSON.stringify(input.previousPlan, null, 2)}
   return `以下の情報をもとに、制作プランを生成してください。
 
 ## リファレンス画像
-${input.referenceImagePath}
+まず以下のパスの画像をReadツールで読み取り、分析してください: ${input.referenceImagePath}
 
 ## ユーザーの目標
 ${input.goalDescription}
@@ -128,8 +128,9 @@ export async function generatePlan(input: GeneratePlanInput): Promise<GeneratePl
   const engineResult = await invokeClaude({
     prompt: buildPlanGenerationPrompt(input),
     appendSystemPrompt: PLAN_SYSTEM_PROMPT,
-    tools: [],
-    maxTurns: 3,
+    tools: ["Read"],
+    allowedTools: ["Read"],
+    maxTurns: 5,
     timeoutMs: 120_000,
     signal: input.signal,
   });

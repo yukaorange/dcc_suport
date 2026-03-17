@@ -32,6 +32,7 @@ export type InvokeClaudeOptions = {
   readonly appendSystemPrompt?: string;
   readonly agents?: Record<string, AgentDefinition>;
   readonly tools?: readonly string[];
+  readonly allowedTools?: readonly string[];
   readonly canUseTool?: CanUseTool;
   readonly model?: string;
   readonly maxTurns?: number;
@@ -150,6 +151,10 @@ function buildQueryOptions(options: InvokeClaudeOptions): SDKOptions {
 
   if (options.tools) {
     queryOptions.tools = [...options.tools];
+  }
+
+  if (options.allowedTools) {
+    queryOptions.allowedTools = [...options.allowedTools];
   }
 
   if (options.canUseTool) {

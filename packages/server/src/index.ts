@@ -30,6 +30,6 @@ const createContext = (): AppContext => ({ db, eventBus, config, coachSession, p
 
 const app = createApp({ createContext });
 
-Bun.serve({ port: PORT, fetch: app.fetch });
+Bun.serve({ port: PORT, fetch: app.fetch, idleTimeout: 255 });
 
 console.log(`DCC Coach server started at http://localhost:${PORT}`);

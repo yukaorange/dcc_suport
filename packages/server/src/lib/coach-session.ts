@@ -61,6 +61,7 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
       const skillManifest = await loadSkillManifest(applications);
 
       const onEvent = (event: LoopEvent) => {
+        console.log(`[coach] ${JSON.stringify(event)}`);
         deps.eventBus.publish({ ...event, sessionId: options.sessionId });
 
         switch (event.kind) {

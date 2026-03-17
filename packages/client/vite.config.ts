@@ -6,6 +6,7 @@ import { defineConfig } from "vite";
 // biome-ignore lint/style/noDefaultExport: Vite requires default export
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  clearScreen: false,
   resolve: {
     alias: {
       "@": resolve(import.meta.dirname, "./src"),

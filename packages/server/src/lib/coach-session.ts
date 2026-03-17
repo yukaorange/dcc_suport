@@ -79,7 +79,7 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
         try {
           deps.eventBus.publish({ ...event, sessionId: options.sessionId });
         } catch (e) {
-          console.error("[coach-session] eventBus.publish failed:", e);
+          log.failed(`eventBus.publish: ${String(e)}`);
         }
 
         try {
@@ -101,7 +101,7 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
               break;
           }
         } catch (e) {
-          console.error("[coach-session] DB write failed:", e);
+          log.failed(`DB write: ${String(e)}`);
         }
       };
 
@@ -145,7 +145,7 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
     submitMessage: (sessionId, message) => {
       const isActive = activeState !== null && activeState.sessionId === sessionId;
       console.log(
-        `[coach-session] submitMessage session=${sessionId}, active=${isActive}, message="${message.slice(0, 50)}"`,
+        `[coach-session] submitMessage session=${sessionId}, active=${isActive}, message="${message.slice(0, 50).replace(/[\r\n]/g, " ")}"`,
       );
       if (!isActive) {
         return { isOk: false, reason: "アクティブなセッションが見つかりません" };

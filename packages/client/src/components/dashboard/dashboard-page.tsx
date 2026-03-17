@@ -45,7 +45,7 @@ function CoachingFeed({
   );
 
   return (
-    <div className="space-y-6 pb-24">
+    <div className="flex flex-col gap-6 pb-24">
       <div className="flex items-center gap-3">
         <h2 className="text-2xl font-bold tracking-tight">Dashboard</h2>
         <Badge

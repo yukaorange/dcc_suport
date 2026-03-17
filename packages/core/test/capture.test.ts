@@ -87,4 +87,36 @@ describe("captureScreen", () => {
     if (result.isOk) return;
     expect(result.errorCode).toBe("RESIZE_FAILED");
   });
+
+  test("数値文字列のdisplayIdはnumberに変換されてscreenshotに渡される", async () => {
+    vi.mocked(screenshot).mockRejectedValueOnce(new Error("test"));
+
+    await captureScreen({ maxWidthPx: 1280, displayId: "2" });
+
+    expect(vi.mocked(screenshot)).toHaveBeenCalledWith({ format: "png", screen: 2 });
+  });
+
+  test("非数値文字列のdisplayIdはそのまま文字列でscreenshotに渡される", async () => {
+    vi.mocked(screenshot).mockRejectedValueOnce(new Error("test"));
+
+    await captureScreen({ maxWidthPx: 1280, displayId: "HDMI-1" });
+
+    expect(vi.mocked(screenshot)).toHaveBeenCalledWith({ format: "png", screen: "HDMI-1" });
+  });
+
+  test("空文字列のdisplayIdは0に変換される", async () => {
+    vi.mocked(screenshot).mockRejectedValueOnce(new Error("test"));
+
+    await captureScreen({ maxWidthPx: 1280, displayId: "" });
+
+    expect(vi.mocked(screenshot)).toHaveBeenCalledWith({ format: "png", screen: 0 });
+  });
+
+  test("displayId未指定時はscreenがundefinedで渡される", async () => {
+    vi.mocked(screenshot).mockRejectedValueOnce(new Error("test"));
+
+    await captureScreen({ maxWidthPx: 1280 });
+
+    expect(vi.mocked(screenshot)).toHaveBeenCalledWith({ format: "png", screen: undefined });
+  });
 });

@@ -66,7 +66,7 @@ export function purgeOldSessions(
     .select({ id: sessions.id, referenceImagePath: sessions.referenceImagePath })
     .from(sessions)
     .orderBy(sql`${sessions.startedAt} DESC, ${sessions.id} DESC`)
-    .limit(-1)
+    .limit(1_000_000) // drizzle-orm は offset 単独で構文エラーになるため「制限なし」の代替
     .offset(MAX_SESSIONS)
     .all();
 

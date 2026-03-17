@@ -4,6 +4,7 @@ import type { DrizzleDb } from "../db/database";
 import { insertPlan } from "../db/plans";
 import { insertSession, purgeOldSessions } from "../db/sessions";
 import type { CoachSessionHandle } from "./coach-session";
+import { createTaggedLogger } from "./logger";
 
 type StartSessionDeps = {
   readonly db: DrizzleDb;
@@ -53,15 +54,16 @@ export async function startSession(
   });
 
   setImmediate(() => {
+    const purgeLog = createTaggedLogger("start-session.purge");
     try {
       const purged = purgeOldSessions(deps.db, sessionId);
       for (const old of purged) {
         unlink(old.referenceImagePath).catch((err: NodeJS.ErrnoException) => {
-          if (err.code !== "ENOENT") console.warn("[start-session] unlink failed:", err);
+          if (err.code !== "ENOENT") purgeLog.failed(`unlink: ${String(err)}`);
         });
       }
     } catch (e) {
-      console.error("[start-session] purge failed:", e);
+      purgeLog.failed(`purge: ${String(e)}`);
     }
   });
 

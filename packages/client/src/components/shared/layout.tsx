@@ -15,7 +15,7 @@ export function Layout({
 }: LayoutProps) {
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-card px-6 py-3 shadow-sm">
         <h1 className="text-lg font-bold tracking-tight">DCC Coach</h1>
         <nav className="flex gap-1">
           {onNavigateToDashboard !== undefined && (

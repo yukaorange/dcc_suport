@@ -6,6 +6,7 @@ type Advice = {
   readonly content: string;
   readonly roundIndex: number;
   readonly timestampMs: number;
+  readonly isRestored: boolean;
 };
 
 type InitialState = {
@@ -52,7 +53,7 @@ export function useLoopEvents(
       onData: (event) => {
         switch (event.kind) {
           case "advice":
-            setAdviceHistory((prev) => [...prev, event.advice]);
+            setAdviceHistory((prev) => [...prev, { ...event.advice, isRestored: false }]);
             break;
           case "plan_step_updated":
             onPlanStepUpdatedRef.current?.(event.stepIndex, event.newStatus);
@@ -65,7 +66,7 @@ export function useLoopEvents(
     },
   );
 
-  const latestAdvice = adviceHistory.length > 0 ? adviceHistory[adviceHistory.length - 1] : null;
+  const latestAdvice = adviceHistory.findLast((a) => !a.isRestored) ?? null;
 
   return { adviceHistory, latestAdvice, isCoachingStopped };
 }

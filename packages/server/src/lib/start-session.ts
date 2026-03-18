@@ -19,10 +19,37 @@ type StartSessionParams = {
   readonly plan: Plan | null;
 };
 
+type SessionRecord = {
+  readonly sessionId: string;
+  readonly planId: string | null;
+};
+
+export type { StartSessionDeps, StartSessionParams, SessionRecord };
+
+export function schedulePurge(db: DrizzleDb, excludeSessionId: string): void {
+  setImmediate(() => {
+    const log = createTaggedLogger("session.purge");
+    try {
+      // @throws — purge処理の失敗はバックグラウンドで握りつぶす
+      const purged = purgeOldSessions(db, excludeSessionId);
+      if (purged.length > 0) {
+        log.info(`purged ${purged.length} old sessions`);
+      }
+      for (const old of purged) {
+        unlink(old.referenceImagePath).catch((err: NodeJS.ErrnoException) => {
+          if (err.code !== "ENOENT") log.failed(`unlink: ${String(err)}`);
+        });
+      }
+    } catch (e) {
+      log.failed(`purge: ${String(e)}`);
+    }
+  });
+}
+
 export async function startSession(
   deps: StartSessionDeps,
   params: StartSessionParams,
-): Promise<{ sessionId: string }> {
+): Promise<SessionRecord> {
   const sessionId = crypto.randomUUID();
 
   insertSession(deps.db, {
@@ -53,19 +80,7 @@ export async function startSession(
     plan: params.plan,
   });
 
-  setImmediate(() => {
-    const purgeLog = createTaggedLogger("start-session.purge");
-    try {
-      const purged = purgeOldSessions(deps.db, sessionId);
-      for (const old of purged) {
-        unlink(old.referenceImagePath).catch((err: NodeJS.ErrnoException) => {
-          if (err.code !== "ENOENT") purgeLog.failed(`unlink: ${String(err)}`);
-        });
-      }
-    } catch (e) {
-      purgeLog.failed(`purge: ${String(e)}`);
-    }
-  });
+  schedulePurge(deps.db, sessionId);
 
-  return { sessionId };
+  return { sessionId, planId };
 }

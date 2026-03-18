@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { findAdvicesBySessionId, insertAdvice } from "../src/db/advices";
+import { copyAdvicesToSession, findAdvicesBySessionId, insertAdvice } from "../src/db/advices";
 import { createDatabase } from "../src/db/database";
 import { findPlanBySessionId, insertPlan } from "../src/db/plans";
 import {
@@ -282,5 +282,78 @@ describe("advices", () => {
     const advices = findAdvicesBySessionId(db, "s1");
     expect(advices[0].timestampMs).toBe(1000);
     expect(advices[1].timestampMs).toBe(5000);
+  });
+
+  test("copyAdvicesToSessionで旧セッションのアドバイスがisRestored=1でコピーされる", () => {
+    const db = createTestDb();
+    insertDummySession(db, "old", "/tmp/old.png");
+    insertDummySession(db, "new", "/tmp/new.png");
+    insertPlan(db, {
+      id: "new-plan",
+      sessionId: "new",
+      goal: "g",
+      referenceSummary: "r",
+      steps: [],
+    });
+
+    insertAdvice(db, {
+      id: "a1",
+      sessionId: "old",
+      planId: null,
+      roundIndex: 0,
+      content: "最初のアドバイス",
+      timestampMs: 1000,
+    });
+    insertAdvice(db, {
+      id: "a2",
+      sessionId: "old",
+      planId: null,
+      roundIndex: 1,
+      content: "次のアドバイス",
+      timestampMs: 2000,
+    });
+
+    copyAdvicesToSession(db, "old", "new", "new-plan");
+
+    const copied = findAdvicesBySessionId(db, "new");
+    expect(copied).toHaveLength(2);
+    expect(copied[0].content).toBe("最初のアドバイス");
+    expect(copied[0].sessionId).toBe("new");
+    expect(copied[0].planId).toBe("new-plan");
+    expect(copied[0].isRestored).toBe(1);
+    expect(copied[0].id).not.toBe("a1");
+    expect(copied[1].content).toBe("次のアドバイス");
+    expect(copied[1].isRestored).toBe(1);
+
+    const originals = findAdvicesBySessionId(db, "old");
+    expect(originals).toHaveLength(2);
+    expect(originals[0].isRestored).toBe(0);
+  });
+
+  test("copyAdvicesToSessionでアドバイスが0件の場合エラーにならない", () => {
+    const db = createTestDb();
+    insertDummySession(db, "old", "/tmp/old.png");
+    insertDummySession(db, "new", "/tmp/new.png");
+
+    copyAdvicesToSession(db, "old", "new", null);
+
+    expect(findAdvicesBySessionId(db, "new")).toHaveLength(0);
+  });
+
+  test("通常のinsertAdviceはisRestored=0になる", () => {
+    const db = createTestDb();
+    insertDummySession(db, "s1", "/tmp/s1.png");
+
+    insertAdvice(db, {
+      id: "a1",
+      sessionId: "s1",
+      planId: null,
+      roundIndex: 0,
+      content: "テスト",
+      timestampMs: 1000,
+    });
+
+    const result = findAdvicesBySessionId(db, "s1");
+    expect(result[0].isRestored).toBe(0);
   });
 });

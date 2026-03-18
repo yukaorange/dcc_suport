@@ -1,10 +1,12 @@
 import { TRPCError } from "@trpc/server";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { findAdvicesBySessionId } from "../../db/advices";
 import { findPlanBySessionId, parsePlanRow, parseStepsJson } from "../../db/plans";
-import { findSessionById, listSessionsWithPlanSteps } from "../../db/sessions";
+import { advices, plans, sessions } from "../../db/schema";
+import { endSession, findSessionById, listSessionsWithPlanSteps } from "../../db/sessions";
 import { createTaggedLogger } from "../../lib/logger";
-import { startSession } from "../../lib/start-session";
+import { schedulePurge } from "../../lib/start-session";
 import { publicProcedure, router } from "../trpc";
 
 export const sessionRouter = router({
@@ -31,7 +33,7 @@ export const sessionRouter = router({
     };
   }),
 
-  get: publicProcedure.input(z.object({ id: z.string() })).query(({ input, ctx }) => {
+  get: publicProcedure.input(z.object({ id: z.string().uuid() })).query(({ input, ctx }) => {
     const log = createTaggedLogger("session.get");
     log.started();
 
@@ -55,6 +57,7 @@ export const sessionRouter = router({
         content: a.content,
         roundIndex: a.roundIndex,
         timestampMs: a.timestampMs,
+        isRestored: a.isRestored === 1,
       })),
     };
   }),
@@ -75,32 +78,96 @@ export const sessionRouter = router({
       return { success: true };
     }),
 
-  restore: publicProcedure.input(z.object({ id: z.string() })).mutation(async ({ input, ctx }) => {
-    const log = createTaggedLogger("session.restore");
-    log.started();
+  restore: publicProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const log = createTaggedLogger("session.restore");
+      log.started();
 
-    const session = findSessionById(ctx.db, input.id);
-    if (session === null) {
-      log.failed("session not found");
-      throw new TRPCError({ code: "NOT_FOUND", message: "セッションが見つかりません" });
-    }
+      const session = findSessionById(ctx.db, input.id);
+      if (session === null) {
+        log.failed("session not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "セッションが見つかりません" });
+      }
 
-    const planRow = findPlanBySessionId(ctx.db, input.id);
-    const plan = planRow ? parsePlanRow(planRow) : null;
+      const planRow = findPlanBySessionId(ctx.db, input.id);
+      const plan = planRow ? parsePlanRow(planRow) : null;
 
-    const result = await startSession(
-      { db: ctx.db, coachSession: ctx.coachSession },
-      {
-        goal: session.goal,
-        referenceImagePath: session.referenceImagePath,
-        displayId: session.displayId,
-        displayName: session.displayName,
-        plan,
-      },
-    );
+      const sessionId = crypto.randomUUID();
+      const planId = plan !== null ? crypto.randomUUID() : null;
 
-    log.info(`restored as newSession=${result.sessionId}`);
-    log.completed();
-    return { sessionId: result.sessionId };
-  }),
+      // Phase 1: 全DB書き込みを単一トランザクションで実行
+      log.info(`creating session=${sessionId}, copying advices from=${input.id}`);
+      ctx.db.transaction((tx) => {
+        tx.insert(sessions)
+          .values({
+            id: sessionId,
+            goal: session.goal,
+            referenceImagePath: session.referenceImagePath,
+            displayId: session.displayId,
+            displayName: session.displayName,
+          })
+          .run();
+
+        if (plan !== null && planId !== null) {
+          tx.insert(plans)
+            .values({
+              id: planId,
+              sessionId,
+              goal: plan.goal,
+              referenceSummary: plan.referenceSummary,
+              steps: JSON.stringify(plan.steps),
+            })
+            .run();
+          log.info(`plan created planId=${planId}`);
+        }
+
+        // advices.ts の copyAdvicesToSession と同等のロジック（トランザクション内実行のためインライン化）
+        const sourceAdvices = tx
+          .select()
+          .from(advices)
+          .where(eq(advices.sessionId, input.id))
+          .orderBy(sql`timestamp_ms ASC`)
+          .all();
+
+        for (const advice of sourceAdvices) {
+          tx.insert(advices)
+            .values({
+              id: crypto.randomUUID(),
+              sessionId,
+              planId,
+              roundIndex: advice.roundIndex,
+              content: advice.content,
+              timestampMs: advice.timestampMs,
+              isRestored: 1,
+            })
+            .run();
+        }
+
+        log.info(`copied ${sourceAdvices.length} advices as restored`);
+      });
+
+      // Phase 2: コーチングループ起動（全DB書き込み成功後のみ到達）
+      log.info("starting coach loop for restored session...");
+      try {
+        await ctx.coachSession.start({
+          sessionId,
+          planId,
+          displayId: session.displayId,
+          referenceImagePath: session.referenceImagePath,
+          plan,
+        });
+      } catch (e) {
+        endSession(ctx.db, sessionId);
+        log.failed(`loop start failed, compensated with endSession: ${String(e)}`);
+        throw e;
+      }
+
+      // Phase 3: 古いセッションのパージ（非同期）
+      schedulePurge(ctx.db, sessionId);
+
+      log.info(`restored as newSession=${sessionId}, copiedAdvicesFrom=${input.id}`);
+      log.completed();
+      return { sessionId };
+    }),
 });

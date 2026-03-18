@@ -1,0 +1,1 @@
+ALTER TABLE `advices` ADD `is_restored` integer DEFAULT 0 NOT NULL;

@@ -37,6 +37,7 @@ export const advices = sqliteTable(
     roundIndex: integer("round_index").notNull(),
     content: text("content").notNull(),
     timestampMs: integer("timestamp_ms").notNull(),
+    isRestored: integer("is_restored").notNull().default(0),
   },
   (table) => [index("idx_advices_session").on(table.sessionId)],
 );

@@ -31,6 +31,7 @@ function CoachingFeed({
     content: string;
     roundIndex: number;
     timestampMs: number;
+    isRestored: boolean;
   }[];
   readonly initialStopped: boolean;
   readonly onBackToSetup: () => void;

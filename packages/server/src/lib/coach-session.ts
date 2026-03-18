@@ -55,6 +55,15 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
     start: async (options) => {
       const log = createTaggedLogger("coach-session");
 
+      log.info(
+        `starting session=${options.sessionId}, planId=${options.planId}, displayId=${options.displayId}`,
+      );
+
+      // abort前にスキルマニフェストを読み込む（失敗しても旧セッションは無傷）
+      const applications = options.plan?.steps.map((s) => s.application) ?? [];
+      const skillManifest = await loadSkillManifest(applications);
+      log.info(`skills loaded: ${skillManifest !== null ? "yes" : "none"}`);
+
       if (activeState !== null) {
         log.info(`stopping previous session=${activeState.sessionId}`);
         activeState.abortController.abort();
@@ -63,15 +72,7 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
         });
       }
 
-      log.info(
-        `starting session=${options.sessionId}, planId=${options.planId}, displayId=${options.displayId}`,
-      );
-
       const abortController = new AbortController();
-
-      const applications = options.plan?.steps.map((s) => s.application) ?? [];
-      const skillManifest = await loadSkillManifest(applications);
-      log.info(`skills loaded: ${skillManifest !== null ? "yes" : "none"}`);
 
       const onEvent = (event: LoopEvent) => {
         console.log(`[coach] ${JSON.stringify(event)}`);

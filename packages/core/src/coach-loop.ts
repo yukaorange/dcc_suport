@@ -273,7 +273,7 @@ async function executeOneRound(
     }),
     agents: buildAgentDefinitions(),
     tools: ["Read", "Agent"],
-    allowedTools: ["Read"],
+    allowedTools: ["Read", "Agent"],
     canUseTool: createToolPermissionGuard(),
     maxTurns: 15,
     timeoutMs: 120_000,

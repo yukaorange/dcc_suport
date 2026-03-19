@@ -2,7 +2,7 @@
 
 Adobe CC（Illustrator / Photoshop / After Effects）の制作画面をAIがリアルタイムで監視し、方針判断・手順案内・GUI操作の指示を出すコーチングツール。
 
-**AIは画面を操作しない。隣に座る先輩デザイナーのように、見て・考えて・声をかける。**
+**AIは成果物を生成しない。凄腕デザイナーのように、進捗を見て・考えて・アドバイスする。**
 
 ![Dashboard](./docs/images/dashboard.png)
 

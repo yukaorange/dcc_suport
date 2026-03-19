@@ -1,6 +1,6 @@
 # アーキテクチャ概要
 
-更新日: 2026-03-16
+更新日: 2026-03-19
 
 ## 全体フロー（現行 + DCC-7）
 
@@ -112,23 +112,46 @@ flowchart LR
 
 ### テストカバレッジ
 
+#### @dcc/core（vitest）
+
 | モジュール | テスト | ファイル / 理由 |
 |-----------|--------|----------------|
 | config.ts | あり | test/config.test.ts |
-| setup-flow.ts | あり | test/setup-flow.test.ts |
-| list-displays.ts | なし | OS依存の副作用のみ（screenshot-desktop のラッパー） |
+| list-displays.ts | あり | test/list-displays.test.ts |
 | planner.ts | あり | test/planner.test.ts |
 | coach-loop.ts | あり | test/coach-loop.test.ts（統合テスト、モック使用） |
 | capture.ts | あり | test/capture.test.ts |
 | diff.ts | あり | test/diff.test.ts |
 | prompts.ts | あり | test/prompts.test.ts |
-| engine.ts | なし | Claude Agent SDK の薄いラッパー。振る舞いは verify/ で手動検証 |
-| output.ts | なし | 純粋な表示ロジック（console.log のみの副作用） |
+| engine.ts | あり | test/engine.test.ts |
 | skills.ts | あり | test/skills.test.ts |
 | agents.ts | あり | test/agents.test.ts |
 | gemini.ts | あり | test/gemini.test.ts（APIキー未設定・URL不正の異常系のみ） |
+| output.ts | なし | 純粋な表示ロジック（console.log のみの副作用） |
 | extract-video.ts | なし | CLIエントリポイント（gemini.ts を呼ぶだけ） |
 | index.ts | なし | エントリポイント（各モジュールの組み合わせのみ） |
+
+手動検証スクリプト群: `src/verify/`（11ファイル）。SDK連携やストリーミング動作を実環境で検証。
+
+#### @dcc/server（bun:test）
+
+| モジュール | テスト | ファイル / 理由 |
+|-----------|--------|----------------|
+| db/sessions.ts | あり | test/db.test.ts（CRUD + パージ） |
+| db/plans.ts | あり | test/db.test.ts（CRUD + ステップ更新） |
+| db/advices.ts | あり | test/db.test.ts（CRUD + 復元コピー） |
+
+#### @dcc/cli（vitest）
+
+| モジュール | テスト | ファイル / 理由 |
+|-----------|--------|----------------|
+| setup-flow.ts | あり | test/setup-flow.test.ts（キャンセル動作） |
+
+#### E2E テスト（Playwright）
+
+| テスト | ファイル / 内容 |
+|--------|----------------|
+| セットアップフロー | e2e/（Chromium、サーバー + クライアント自動起動） |
 
 ## データフロー: セットアップからコーチングまで
 
@@ -559,7 +582,7 @@ flowchart LR
 
 ## DCC-8: モノレポ構成 + プログレスダッシュボード + セッション管理
 
-更新日: 2026-03-16
+更新日: 2026-03-19
 
 DCC-8 では CLIセットアップをブラウザGUIに置き換え、プログレスダッシュボードとセッション永続化を追加する。
 既存コードをモノレポに再構成し、4つのパッケージに分離する。
@@ -704,7 +727,7 @@ erDiagram
         TEXT goal
         TEXT reference_image_path
         TEXT display_id
-        TEXT display_name
+        TEXT display_name "default=''"
         TEXT started_at
         TEXT ended_at "NULLなら進行中"
     }
@@ -725,8 +748,14 @@ erDiagram
         INTEGER round_index
         TEXT content
         INTEGER timestamp_ms
+        INTEGER is_restored "default=0, 復元されたアドバイスか"
     }
 ```
+
+#### インデックス
+
+- `idx_plans_session` — plans.session_id
+- `idx_advices_session` — advices.session_id
 
 ### セットアップフローの変化
 
@@ -737,7 +766,10 @@ erDiagram
 | 目標入力 | inquirer input | `<textarea>` |
 | プラン確認 | ターミナル表示 + Y/N | カード表示 + 承認/再生成ボタン |
 | アドバイス表示 | ターミナル出力 | ダッシュボード（リアルタイム） |
+| ユーザーメッセージ送信 | stdin入力 | メッセージ入力バー（⌘+Enter） |
 | セッション履歴 | なし | SQLite永続化 + 一覧/復元UI |
+| セッション復元 | なし | 過去セッションのアドバイス履歴を引き継いで新セッション作成 |
+| セッションパージ | なし | 200件超の古いセッションを自動削除（画像ファイル含む） |
 
 ### CLI版との共存
 
@@ -748,8 +780,158 @@ bun run start:web  → packages/server/src/index.ts  → @dcc/core + Hono + tRPC
 
 コアロジック（`@dcc/core`）は両方から共有。CLI版は一切変更なし。
 
+## @dcc/server パッケージ内部構成
+
+```mermaid
+flowchart LR
+    subgraph trpc ["tRPC ルーター (src/trpc/)"]
+        Router["appRouter"]
+        Session["sessionRouter<br>list / get / sendMessage / restore"]
+        Plan["planRouter<br>generate"]
+        Setup["setupRouter<br>start"]
+        Display["displayRouter<br>list"]
+        Events["eventsRouter<br>subscribe (SSE)"]
+        Debug["debugRouter<br>ping / ctx / activeSession / dbStatus / log<br>（dev環境のみ）"]
+    end
+
+    subgraph lib ["アプリケーション層 (src/lib/)"]
+        CoachSession["coach-session.ts<br>createCoachSession()"]
+        StartSession["start-session.ts<br>startSession() / schedulePurge()"]
+        ImageStore["image-store.ts<br>saveBase64Image()"]
+        Logger["logger.ts<br>createTaggedLogger()"]
+    end
+
+    subgraph pure ["純粋ロジック (src/pure/)"]
+        EventBus["event-bus.ts<br>createEventBus()"]
+        PlanCache["pending-plan-cache.ts<br>createPendingPlanCache()<br>TTL: 30分"]
+    end
+
+    subgraph db ["データアクセス (src/db/)"]
+        Database["database.ts<br>createDatabase()"]
+        Sessions["sessions.ts<br>CRUD + purge"]
+        Plans["plans.ts<br>CRUD + stepStatus更新"]
+        Advices["advices.ts<br>CRUD + copyAdvicesToSession()"]
+    end
+
+    Router --> Session & Plan & Setup & Display & Events & Debug
+    Setup --> CoachSession & StartSession & PlanCache
+    Session --> CoachSession & db
+    Plan --> PlanCache & ImageStore
+    Events --> EventBus
+    CoachSession --> EventBus & db
+    StartSession --> db
+
+    style trpc fill:#e3f2fd
+    style lib fill:#fff3e0
+    style pure fill:#e8f5e9
+    style db fill:#f3e5f5
+```
+
+### tRPC プロシージャ一覧
+
+| ルーター | プロシージャ | 種類 | 役割 |
+|---------|------------|------|------|
+| session | list | query | セッション一覧（プランステップ数付き） |
+| session | get | query | セッション詳細（プラン + アドバイス履歴） |
+| session | sendMessage | mutation | アクティブセッションへユーザーメッセージ送信 |
+| session | restore | mutation | 過去セッションのアドバイス履歴を引き継いで新セッション作成 |
+| plan | generate | mutation | リファレンス画像 + 目標からプラン生成 |
+| setup | start | mutation | キャッシュ済みプランでセッション開始 |
+| display | list | query | 接続ディスプレイ一覧 |
+| events | subscribe | subscription | SSE でリアルタイムイベント配信（sessionId フィルタ） |
+
+## セッション復元フロー
+
+過去のセッションからアドバイス履歴を引き継いで新セッションを作成する機能。
+
+```mermaid
+sequenceDiagram
+    participant UI as ブラウザ
+    participant API as session.restore
+    participant DB as SQLite
+
+    UI->>API: restore({ sourceSessionId })
+    API->>DB: findSessionById(sourceId)
+    API->>DB: findPlanBySessionId(sourceId)
+    API->>DB: insertSession(新セッション)
+    API->>DB: insertPlan(プランコピー)
+    API->>DB: copyAdvicesToSession(sourceId → targetId)
+    Note over DB: isRestored=1 でコピー
+    API->>API: schedulePurge(db, newSessionId)
+    API-->>UI: { sessionId: 新ID }
+    UI->>UI: ダッシュボードに遷移
+    Note over UI: 復元アドバイスは「前回」バッジで表示
+```
+
+## セッションパージ
+
+セッション数が 200 を超えた場合、古いセッションを自動削除する。`setup.start` と `session.restore` の完了後に `setImmediate` で非同期実行される。
+
+- 現在のセッションは除外
+- カスケード削除: advices → plans → sessions
+- 関連する画像ファイルも削除（他セッションと共有していないもののみ）
+
+## ユーザーメッセージ送信フロー
+
+ダッシュボードからコーチに質問を送る機能。
+
+```mermaid
+sequenceDiagram
+    participant UI as MessageInput
+    participant API as session.sendMessage
+    participant CS as CoachSession
+    participant Loop as Coーチングループ
+
+    UI->>API: sendMessage({ sessionId, content })
+    API->>CS: submitMessage(sessionId, content)
+    CS->>Loop: loop.submitMessage(content)
+    Note over Loop: MessageBox にバッファ<br>→ sleep を中断<br>→ diff スキップで即座に AI 呼び出し
+    Loop-->>CS: onEvent({ kind: "advice", ... })
+    CS-->>UI: SSE で配信
+```
+
+## CI/CD（GitHub Actions）
+
+`.github/workflows/check.yml` で push 時に 3 つのジョブを並列実行。
+
+| ジョブ | コマンド | 内容 |
+|--------|---------|------|
+| TypeCheck | `bun run typecheck` | 全パッケージの TypeScript 型検査 |
+| Lint & Format | `bunx biome ci .` | Biome によるコード品質チェック |
+| Unit Tests | `bun run test` | vitest（core/cli）+ bun:test（server） |
+
+## @dcc/client ページ構成
+
+クライアントは React 19 + Vite の SPA で、3 つのフェーズを状態マシンで管理する。
+
+```mermaid
+stateDiagram-v2
+    [*] --> setup
+    setup --> coaching : onCoachingStarted
+    setup --> sessions : onNavigateToSessions
+    coaching --> sessions : onNavigateToSessions
+    coaching --> setup : onBackToSetup
+    sessions --> setup : onNavigateToSetup
+    sessions --> coaching : onRestore
+```
+
+| フェーズ | ページ | 主なコンポーネント |
+|---------|-------|------------------|
+| setup | SetupPage | DisplaySelector, ReferenceUploader, GoalInput, PlanReview |
+| coaching | DashboardPage | LatestAdvice, PlanProgress, AdviceTimeline, MessageInput |
+| sessions | SessionListPage / SessionDetailPage | セッション一覧, 復元ボタン, 過去アドバイス閲覧 |
+
+### SSE サブスクリプション
+
+`useLoopEvents` カスタムフックが `trpc.events.subscribe` を購読し、リアルタイムでダッシュボードを更新する。
+
+| イベント種別 | 処理 |
+|------------|------|
+| advice | adviceHistory に追加 |
+| plan_step_updated | プランステップの status を更新 |
+| stopped | コーチング終了表示 |
+
 ## 関連ドキュメント
 
 - [プロジェクト思想](./memory/README.md) — 「隣に座っている先輩デザイナー」の考え方
 - [ロードマップ](./roadmap/loadmap.md) — Phase 1-6 の開発計画
-- [DCC-8 実装プラン](./../.work/plan-DCC-8.md) — 詳細な実装ステップ

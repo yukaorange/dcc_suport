@@ -1,13 +1,16 @@
+import type { PlanStepStatus } from "@dcc/core";
 import { TRPCError } from "@trpc/server";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { findAdvicesBySessionId } from "../../db/advices";
-import { findPlanBySessionId, parsePlanRow, parseStepsJson } from "../../db/plans";
+import { findPlanBySessionId, parsePlanRow, parseStepsJson, updatePlanStepStatus } from "../../db/plans";
 import { advices, plans, sessions } from "../../db/schema";
 import { endSession, findSessionById, listSessionsWithPlanSteps } from "../../db/sessions";
 import { createTaggedLogger } from "../../lib/logger";
 import { schedulePurge } from "../../lib/start-session";
 import { publicProcedure, router } from "../trpc";
+
+const planStepStatusSchema = z.enum(["pending", "in_progress", "completed"]) satisfies z.ZodType<PlanStepStatus>;
 
 export const sessionRouter = router({
   list: publicProcedure.query(({ ctx }) => {
@@ -75,6 +78,19 @@ export const sessionRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });
       }
 
+      return { success: true };
+    }),
+
+  updateStepStatus: publicProcedure
+    .input(
+      z.object({
+        sessionId: z.string().uuid(),
+        stepIndex: z.number().int().min(0),
+        newStatus: planStepStatusSchema,
+      }),
+    )
+    .mutation(({ input, ctx }) => {
+      updatePlanStepStatus(ctx.db, input.sessionId, input.stepIndex, input.newStatus);
       return { success: true };
     }),
 
@@ -148,6 +164,11 @@ export const sessionRouter = router({
       });
 
       // Phase 2: コーチングループ起動（全DB書き込み成功後のみ到達）
+      const restoredAdvices = findAdvicesBySessionId(ctx.db, sessionId).map((a) => ({
+        content: a.content,
+        roundIndex: a.roundIndex,
+      }));
+
       log.info("starting coach loop for restored session...");
       try {
         await ctx.coachSession.start({
@@ -156,6 +177,7 @@ export const sessionRouter = router({
           displayId: session.displayId,
           referenceImagePath: session.referenceImagePath,
           plan,
+          previousAdvices: restoredAdvices,
         });
       } catch (e) {
         endSession(ctx.db, sessionId);

@@ -7,7 +7,7 @@ import { computeDiff } from "./diff";
 import { checkSessionContinuity, type EngineResult, invokeClaude } from "./engine";
 import { COACH_TEMP_DIR } from "./paths";
 import type { Plan, PlanStepStatus } from "./planner";
-import { buildCoachSystemPrompt, buildCoachUserPrompt } from "./prompts";
+import { type RestoredAdvice, buildCoachSystemPrompt, buildCoachUserPrompt } from "./prompts";
 import { createToolPermissionGuard } from "./skills";
 
 type CoachAdvice = {
@@ -69,6 +69,7 @@ type CoachLoopOptions = {
   readonly referenceImagePath: string | null;
   readonly plan: Plan | null;
   readonly skillManifest: string | null;
+  readonly previousAdvices: readonly RestoredAdvice[];
 };
 
 type CoachLoopHandle = {
@@ -270,6 +271,7 @@ async function executeOneRound(
       referenceImagePath: options.referenceImagePath,
       plan: state.plan,
       skillManifest: options.skillManifest,
+      previousAdvices: options.previousAdvices,
     }),
     agents: buildAgentDefinitions(),
     tools: ["Read", "Agent"],

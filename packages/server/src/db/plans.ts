@@ -1,4 +1,4 @@
-import type { Plan, PlanStep, PlanStepStatus } from "@dcc/core";
+import { type Plan, type PlanStep, type PlanStepStatus, updateStepStatus } from "@dcc/core";
 import { eq, sql } from "drizzle-orm";
 import type { DrizzleDb } from "./database";
 import { plans } from "./schema";
@@ -47,7 +47,7 @@ export function updatePlanStepStatus(
   newStatus: PlanStepStatus,
 ): void {
   const row = db
-    .select({ id: plans.id, steps: plans.steps })
+    .select({ id: plans.id, goal: plans.goal, referenceSummary: plans.referenceSummary, steps: plans.steps })
     .from(plans)
     .where(eq(plans.sessionId, sessionId))
     .orderBy(sql`created_at DESC`)
@@ -56,13 +56,12 @@ export function updatePlanStepStatus(
 
   if (row === undefined) return;
 
-  const steps = JSON.parse(row.steps) as PlanStep[];
-  const updatedSteps = steps.map((step) =>
-    step.index === stepIndex ? { ...step, status: newStatus } : step,
-  );
+  // @throws JSON.parse — steps カラムは内部で書き込んだJSONのため破損は想定外
+  const plan = parsePlanRow(row);
+  const updated = updateStepStatus(plan, stepIndex, newStatus);
 
   db.update(plans)
-    .set({ steps: JSON.stringify(updatedSteps) })
+    .set({ steps: JSON.stringify(updated.steps) })
     .where(eq(plans.id, row.id))
     .run();
 }

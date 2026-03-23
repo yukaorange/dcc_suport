@@ -21,7 +21,7 @@ export type {
   PlanStepStatus,
 } from "./planner";
 export { generatePlan, updateStepStatus } from "./planner";
-export type { CoachPromptInput, CoachSystemPromptInput } from "./prompts";
+export type { CoachPromptInput, CoachSystemPromptInput, RestoredAdvice } from "./prompts";
 export { buildCoachSystemPrompt, buildCoachUserPrompt } from "./prompts";
 export type { SkillManifestInput, SkillManifestResult } from "./skills";
 export { buildSkillManifest, createToolPermissionGuard, loadSkillManifest } from "./skills";

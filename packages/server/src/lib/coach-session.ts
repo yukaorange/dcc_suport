@@ -2,6 +2,7 @@ import {
   type CoachConfig,
   type CoachLoopHandle,
   type LoopEvent,
+  type RestoredAdvice,
   loadSkillManifest,
   type Plan,
   startCoachLoop,
@@ -25,6 +26,7 @@ type StartOptions = {
   readonly displayId?: string;
   readonly referenceImagePath: string | null;
   readonly plan: Plan | null;
+  readonly previousAdvices?: readonly RestoredAdvice[];
 };
 
 type SubmitMessageResult =
@@ -115,6 +117,7 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
         referenceImagePath: options.referenceImagePath,
         plan: options.plan,
         skillManifest,
+        previousAdvices: options.previousAdvices ?? [],
       });
 
       activeState = { sessionId: options.sessionId, loop, abortController };

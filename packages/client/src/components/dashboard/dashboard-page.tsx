@@ -86,6 +86,8 @@ export function DashboardPage({ sessionId, onBackToSetup }: DashboardPageProps) 
   const initialAdvices = data?.advices ?? [];
   const initialStopped = data?.session.endedAt !== null && data?.session.endedAt !== undefined;
 
+  const updateStepMutation = trpc.session.updateStepStatus.useMutation();
+
   const handlePlanStepUpdated = (stepIndex: number, newStatus: PlanStepStatus) => {
     utils.session.get.setData({ id: sessionId }, (prev) => {
       if (prev?.plan === null || prev?.plan === undefined) return prev;
@@ -101,6 +103,11 @@ export function DashboardPage({ sessionId, onBackToSetup }: DashboardPageProps) 
     });
   };
 
+  const handleToggleStep = (stepIndex: number, newStatus: PlanStepStatus) => {
+    handlePlanStepUpdated(stepIndex, newStatus);
+    updateStepMutation.mutate({ sessionId, stepIndex, newStatus });
+  };
+
   if (!isDataLoaded) {
     return <p className="text-sm text-muted-foreground">読み込み中...</p>;
   }
@@ -113,7 +120,9 @@ export function DashboardPage({ sessionId, onBackToSetup }: DashboardPageProps) 
       onBackToSetup={onBackToSetup}
       onPlanStepUpdated={handlePlanStepUpdated}
     >
-      {data.plan !== null && data.plan !== undefined && <PlanProgress plan={data.plan} />}
+      {data.plan !== null && data.plan !== undefined && (
+        <PlanProgress plan={data.plan} onToggleStep={handleToggleStep} />
+      )}
     </CoachingFeed>
   );
 }

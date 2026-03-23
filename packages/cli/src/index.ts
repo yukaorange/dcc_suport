@@ -94,6 +94,7 @@ const { loopFinished, submitMessage } = startCoachLoop({
   referenceImagePath,
   plan,
   skillManifest,
+  previousAdvices: [],
 });
 
 rl.on("line", (line) => {

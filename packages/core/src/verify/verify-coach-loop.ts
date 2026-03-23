@@ -44,6 +44,7 @@ export async function verifyCoachLoop(): Promise<VerifyResult> {
       referenceImagePath: null,
       plan: null,
       skillManifest: null,
+      previousAdvices: [],
     });
     await loopFinished;
   } catch (e) {

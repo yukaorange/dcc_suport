@@ -3,14 +3,23 @@ import { TRPCError } from "@trpc/server";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { findAdvicesBySessionId } from "../../db/advices";
-import { findPlanBySessionId, parsePlanRow, parseStepsJson, updatePlanStepStatus } from "../../db/plans";
+import {
+  findPlanBySessionId,
+  parsePlanRow,
+  parseStepsJson,
+  updatePlanStepStatus,
+} from "../../db/plans";
 import { advices, plans, sessions } from "../../db/schema";
 import { endSession, findSessionById, listSessionsWithPlanSteps } from "../../db/sessions";
 import { createTaggedLogger } from "../../lib/logger";
 import { schedulePurge } from "../../lib/start-session";
 import { publicProcedure, router } from "../trpc";
 
-const planStepStatusSchema = z.enum(["pending", "in_progress", "completed"]) satisfies z.ZodType<PlanStepStatus>;
+const planStepStatusSchema = z.enum([
+  "pending",
+  "in_progress",
+  "completed",
+]) satisfies z.ZodType<PlanStepStatus>;
 
 export const sessionRouter = router({
   list: publicProcedure.query(({ ctx }) => {

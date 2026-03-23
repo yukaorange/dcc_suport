@@ -2,9 +2,9 @@ import {
   type CoachConfig,
   type CoachLoopHandle,
   type LoopEvent,
-  type RestoredAdvice,
   loadSkillManifest,
   type Plan,
+  type RestoredAdvice,
   startCoachLoop,
 } from "@dcc/core";
 import { insertAdvice } from "../db/advices";

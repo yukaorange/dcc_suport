@@ -47,7 +47,12 @@ export function updatePlanStepStatus(
   newStatus: PlanStepStatus,
 ): void {
   const row = db
-    .select({ id: plans.id, goal: plans.goal, referenceSummary: plans.referenceSummary, steps: plans.steps })
+    .select({
+      id: plans.id,
+      goal: plans.goal,
+      referenceSummary: plans.referenceSummary,
+      steps: plans.steps,
+    })
     .from(plans)
     .where(eq(plans.sessionId, sessionId))
     .orderBy(sql`created_at DESC`)

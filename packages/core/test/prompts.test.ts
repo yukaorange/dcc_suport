@@ -6,6 +6,7 @@ const BASE_INPUT = {
   referenceImagePath: null,
   plan: null,
   skillManifest: null,
+  previousAdvices: [],
 } as const;
 
 describe("buildCoachUserPrompt", () => {
@@ -141,6 +142,7 @@ describe("buildCoachSystemPrompt", () => {
       referenceImagePath: null,
       plan: null,
       skillManifest: null,
+      previousAdvices: [],
     });
 
     expect(result).toContain("__SILENT__");
@@ -151,6 +153,7 @@ describe("buildCoachSystemPrompt", () => {
       referenceImagePath: "/tmp/ref.png",
       plan: null,
       skillManifest: null,
+      previousAdvices: [],
     });
 
     expect(result).toContain("リファレンス画像");
@@ -162,6 +165,7 @@ describe("buildCoachSystemPrompt", () => {
       referenceImagePath: null,
       plan: SAMPLE_PLAN,
       skillManifest: null,
+      previousAdvices: [],
     });
 
     expect(result).toContain("制作プラン");
@@ -177,6 +181,7 @@ describe("buildCoachSystemPrompt", () => {
       referenceImagePath: null,
       plan: SAMPLE_PLAN,
       skillManifest: null,
+      previousAdvices: [],
     });
 
     expect(result).toContain("[完了]");
@@ -191,6 +196,7 @@ describe("buildCoachSystemPrompt", () => {
       referenceImagePath: null,
       plan: null,
       skillManifest: manifest,
+      previousAdvices: [],
     });
 
     expect(result).toContain("スキルファイル（操作リファレンス）");
@@ -207,6 +213,7 @@ describe("buildCoachSystemPrompt", () => {
       referenceImagePath: null,
       plan: null,
       skillManifest: malicious,
+      previousAdvices: [],
     });
 
     const openIndex = result.indexOf("<skill-reference-data>");
@@ -233,11 +240,13 @@ describe("buildCoachSystemPrompt", () => {
       referenceImagePath: null,
       plan: null,
       skillManifest: malicious,
+      previousAdvices: [],
     });
     const resultClean = buildCoachSystemPrompt({
       referenceImagePath: null,
       plan: null,
       skillManifest: clean,
+      previousAdvices: [],
     });
 
     const injectedCount = resultWithInjection.split("<skill-reference-data>").length - 1;
@@ -250,6 +259,7 @@ describe("buildCoachSystemPrompt", () => {
       referenceImagePath: null,
       plan: null,
       skillManifest: null,
+      previousAdvices: [],
     });
 
     expect(result).not.toContain("スキルファイル（操作リファレンス）");

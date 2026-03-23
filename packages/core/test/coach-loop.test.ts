@@ -67,6 +67,7 @@ function runLoop(abortController: AbortController, onEvent: (e: LoopEvent) => vo
     referenceImagePath: null,
     plan: null,
     skillManifest: null,
+    previousAdvices: [],
   });
 }
 
@@ -173,6 +174,7 @@ describe("startCoachLoop", () => {
       referenceImagePath: null,
       plan: null,
       skillManifest: null,
+      previousAdvices: [],
     });
 
     await loopFinished;
@@ -211,6 +213,7 @@ describe("startCoachLoop", () => {
       referenceImagePath: "/tmp/ref.png",
       plan,
       skillManifest: null,
+      previousAdvices: [],
     });
     await loopFinished;
 
@@ -244,6 +247,7 @@ describe("startCoachLoop", () => {
       referenceImagePath: null,
       plan: null,
       skillManifest: "- skills/techniques/masks.md\n- skills/tools/photoshop/shortcuts.md",
+      previousAdvices: [],
     });
     await loopFinished;
 
@@ -279,6 +283,7 @@ describe("startCoachLoop", () => {
       referenceImagePath: null,
       plan: null,
       skillManifest: null,
+      previousAdvices: [],
     });
 
     await loopFinished;

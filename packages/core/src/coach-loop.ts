@@ -7,7 +7,7 @@ import { computeDiff } from "./diff";
 import { checkSessionContinuity, type EngineResult, invokeClaude } from "./engine";
 import { COACH_TEMP_DIR } from "./paths";
 import type { Plan, PlanStepStatus } from "./planner";
-import { type RestoredAdvice, buildCoachSystemPrompt, buildCoachUserPrompt } from "./prompts";
+import { buildCoachSystemPrompt, buildCoachUserPrompt, type RestoredAdvice } from "./prompts";
 import { createToolPermissionGuard } from "./skills";
 
 type CoachAdvice = {

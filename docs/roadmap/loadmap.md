@@ -687,7 +687,7 @@ dcc_suport/
 
 ## 開発優先順位
 
-進捗更新日: 2026-03-19
+進捗更新日: 2026-03-28
 
 ### Phase 1: 最小動作検証 ✅ 完了
 
@@ -715,8 +715,7 @@ dcc_suport/
 - [x] Gemini 2.5 Flash API接続検証（`@google/genai` + 無料枠動作確認）
 - [x] YouTube動画 → Gemini構造化抽出パイプラインの実装
 - [x] createToolPermissionGuard() によるツール実行の権限制御
-- [ ] Photoshop / Illustrator / After Effects のtoolsスキルファイル初期作成（コンテンツ未充実）
-- [ ] expressionsスキルファイルのサンプル作成（コンテンツ未充実）
+- [x] allowedTools に Agent を追加し、researcher サブエージェントが実際に起動できるよう修正
 
 ### Phase 4: ダッシュボード＋セッション管理 ✅ 完了（DCC-8 としてモノレポ化と統合実装）
 
@@ -725,21 +724,22 @@ dcc_suport/
 - [x] React SPA + Vite（localhost:5173）
 - [x] SSEでリアルタイム更新（tRPC subscription）
 - [x] セットアップUI（ディスプレイ選択、画像D&D、目標入力、プラン確認）
-- [x] ダッシュボード（プラン進捗、最新アドバイス、アドバイス履歴）
+- [x] ダッシュボード（プラン進捗、最新アドバイス、アドバイス履歴、ステップ手動チェック）
 - [x] SQLiteによるセッション永続化（sessions / plans / advices）
 - [x] セッション一覧・詳細閲覧
-- [x] セッション復元（過去のアドバイス履歴引き継ぎ）
+- [x] セッション復元（過去のアドバイス履歴引き継ぎ + Claudeへの履歴伝達）
 - [x] ユーザーメッセージ送信（ダッシュボードからコーチに質問）
 - [x] セッションパージ（200件超の古いセッション自動削除）
 - [x] CI/CD（GitHub Actions: typecheck + lint + test）
 - [x] E2Eテスト（Playwright）
-- [ ] Hooks（Stop / SessionStart / Notification）— DB永続化で代替済み、Hooks実装は見送り
+- [x] ~~Hooks（Stop / SessionStart / Notification）~~ — DB永続化で代替済み、実装見送り
 
 ### Phase 5: 体験改善
 
 - [x] プランの永続化・セッション再開（SQLite + 復元機能で実現）
-- [ ] エラーハンドリング・リトライの強化
-- [ ] OS通知（node-notifier）
+- [ ] エラーハンドリング・リトライの強化（[DCC-17](https://github.com/yukaorange/dcc_suport/issues/29)）
+- [ ] OS通知（[DCC-18](https://github.com/yukaorange/dcc_suport/issues/30)）
+- [ ] 動画リサーチフローの品質検証ループ（[DCC-16](https://github.com/yukaorange/dcc_suport/issues/28)）
 
 ### Phase 6: 拡張（オプション）
 

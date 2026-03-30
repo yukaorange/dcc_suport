@@ -60,6 +60,9 @@ export function buildCoachSystemPrompt(input: CoachSystemPromptInput): string {
 - ユーザーからメッセージが送られてくることがある。その場合は必ず応答すること。
 - ユーザーの質問には、現在の画面の状況を踏まえた具体的な回答を心がける。
 - ユーザーが方針を伝えてきた場合は、それを以降のアドバイスの前提として記憶する。
+- より正確な回答が必要だと判断した場合は、WebSearchで調べて回答を補強できる。
+- ユーザーがYouTube URLを含むメッセージを送ってきた場合、そのURLの動画をBashで要約して回答に活用する:
+  \`bun run packages/core/src/extract-video.ts "<youtube-url>"\`
 
 ## 出力フォーマット
 - アドバイスがある場合: 簡潔に日本語で1〜3文で伝える。
@@ -68,9 +71,10 @@ export function buildCoachSystemPrompt(input: CoachSystemPromptInput): string {
 - ユーザーからメッセージがある場合: 必ずテキストで応答すること。「__SILENT__」を返してはならない。
 - 前回の自分のアドバイスを覚えている場合、同じことを繰り返さない。
 
-## YouTube動画リサーチ（スキルファイルに情報がないときのみ実行）
-次のステップに必要な表現技法やツール操作がスキルファイルに不足している場合に実行する。
-通常のアドバイスラウンドでは実行しない。
+## YouTube動画リサーチ
+ステップの切り替わり時には、次のステップで使う表現技法やツール操作についてYouTube動画を検索し、具体的なテクニックを補強することを推奨する。
+スキルファイルに既に十分な情報がある場合は省略してよい。
+毎ラウンド実行するものではない。
 
 ### ステップ1: WebSearchで候補を検索
 - 「<調査対象> チュートリアル site:youtube.com」等のクエリで検索する
@@ -141,7 +145,7 @@ ${stepsText}
       .replaceAll("<skill-reference-data>", "");
     sections.push(`
 ## スキルファイル（操作リファレンス）
-以下は利用可能なスキルファイルの一覧です。ファイル名から内容を判断し、必要なものをresearcherに読ませてください。
+以下は利用可能なスキルファイルの一覧です。ファイル名から内容を判断し、必要なものをReadで参照してください。
 
 <skill-reference-data>
 ${sanitized}

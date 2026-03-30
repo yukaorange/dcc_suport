@@ -112,7 +112,7 @@ function classifyAbortReason(
   externalSignal: AbortSignal | undefined,
   internalSignal: AbortSignal,
   timeoutMs: number,
-): EngineFailure | null {
+): Omit<EngineFailure, "rawMessages"> | null {
   if (externalSignal?.aborted) {
     return {
       isOk: false,
@@ -228,7 +228,12 @@ export async function invokeClaude(options: InvokeClaudeOptions): Promise<Engine
 
   if (options.signal?.aborted) {
     releaseQueryLock(myStartTime);
-    return { isOk: false, errorCode: "ABORTED", message: "Aborted before query started", rawMessages: [] };
+    return {
+      isOk: false,
+      errorCode: "ABORTED",
+      message: "Aborted before query started",
+      rawMessages: [],
+    };
   }
 
   const abortController = new AbortController();
@@ -257,7 +262,12 @@ export async function invokeClaude(options: InvokeClaudeOptions): Promise<Engine
   }
 
   if (stream.resultText === undefined || stream.resultText.trim().length === 0) {
-    return { isOk: false, errorCode: "EMPTY_RESULT", message: "SDK returned no result", rawMessages: stream.rawMessages };
+    return {
+      isOk: false,
+      errorCode: "EMPTY_RESULT",
+      message: "SDK returned no result",
+      rawMessages: stream.rawMessages,
+    };
   }
 
   return {

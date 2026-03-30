@@ -117,10 +117,7 @@ export async function verifyAgentWithGuard(): Promise<VerifyResult> {
     return { ...failure, durationMs };
   }
 
-  const flags = [
-    trace.webSearchExecuted ? "WebSearch" : null,
-    trace.bashExecuted ? "Bash" : null,
-  ]
+  const flags = [trace.webSearchExecuted ? "WebSearch" : null, trace.bashExecuted ? "Bash" : null]
     .filter(Boolean)
     .join(", ");
 

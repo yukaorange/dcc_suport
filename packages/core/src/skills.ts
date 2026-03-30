@@ -111,7 +111,11 @@ function validateBashCommand(
   }
 
   const [, runner, runCmd, scriptPath, rawUrl] = match;
-  if (SHELL_META_CHARS.test(runner) || SHELL_META_CHARS.test(runCmd) || SHELL_META_CHARS.test(scriptPath)) {
+  if (
+    SHELL_META_CHARS.test(runner) ||
+    SHELL_META_CHARS.test(runCmd) ||
+    SHELL_META_CHARS.test(scriptPath)
+  ) {
     return { isValid: false, reason: `Shell meta characters are not allowed. ${ALLOWED_FORMAT}` };
   }
 
@@ -185,15 +189,15 @@ function checkWritePermission(
   return ALLOW;
 }
 
-const YOUTUBE_VIDEO_URL_PATTERN =
-  /^https?:\/\/(www\.|m\.)?(youtube\.com\/watch|youtu\.be\/)/;
+const YOUTUBE_VIDEO_URL_PATTERN = /^https?:\/\/(www\.|m\.)?(youtube\.com\/watch|youtu\.be\/)/;
 
 function checkWebFetchPermission(input: Record<string, unknown>): PermissionResult {
   const url = input.url;
   if (typeof url === "string" && YOUTUBE_VIDEO_URL_PATTERN.test(url)) {
     return {
       behavior: "deny",
-      message: "WebFetch denied: YouTube video pages are too large. Use WebSearch results for metadata instead.",
+      message:
+        "WebFetch denied: YouTube video pages are too large. Use WebSearch results for metadata instead.",
     };
   }
   return ALLOW;

@@ -14,13 +14,13 @@ describe("buildAgentDefinitions", () => {
     expect(advisor.prompt.length).toBeGreaterThan(0);
   });
 
-  test("researcherにはWebSearch, Read, Write, Bash, Globを含むツールが設定される", () => {
+  test("researcherにはRead, Write, Globのみが設定される（WebSearch/WebFetch/Bashは含まない）", () => {
     const { researcher } = buildAgentDefinitions();
-    expect(researcher.tools).toContain("WebSearch");
-    expect(researcher.tools).toContain("WebFetch");
     expect(researcher.tools).toContain("Read");
     expect(researcher.tools).toContain("Write");
-    expect(researcher.tools).toContain("Bash");
     expect(researcher.tools).toContain("Glob");
+    expect(researcher.tools).not.toContain("WebSearch");
+    expect(researcher.tools).not.toContain("WebFetch");
+    expect(researcher.tools).not.toContain("Bash");
   });
 });

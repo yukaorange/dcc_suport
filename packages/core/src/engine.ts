@@ -20,6 +20,7 @@ type EngineFailure = {
   readonly isOk: false;
   readonly errorCode: EngineErrorCode;
   readonly message: string;
+  readonly rawMessages: readonly unknown[];
 };
 
 export type EngineResult = EngineSuccess | EngineFailure;
@@ -53,6 +54,7 @@ function acquireQueryLock(timeoutMs: number): EngineFailure | number {
         isOk: false,
         errorCode: "SDK_ERROR",
         message: `Previous query still running (elapsed: ${elapsed}ms). Skipped to prevent accumulation.`,
+        rawMessages: [],
       };
     }
     console.warn(`WARNING: Stale query lock detected (${elapsed}ms). Allowing new query.`);
@@ -226,7 +228,7 @@ export async function invokeClaude(options: InvokeClaudeOptions): Promise<Engine
 
   if (options.signal?.aborted) {
     releaseQueryLock(myStartTime);
-    return { isOk: false, errorCode: "ABORTED", message: "Aborted before query started" };
+    return { isOk: false, errorCode: "ABORTED", message: "Aborted before query started", rawMessages: [] };
   }
 
   const abortController = new AbortController();
@@ -243,18 +245,19 @@ export async function invokeClaude(options: InvokeClaudeOptions): Promise<Engine
   options.signal?.removeEventListener("abort", onExternalAbort);
 
   const abortResult = classifyAbortReason(options.signal, abortController.signal, timeoutMs);
-  if (abortResult) return abortResult;
+  if (abortResult) return { ...abortResult, rawMessages: stream.rawMessages };
 
   if (stream.error !== null) {
     return {
       isOk: false,
       errorCode: "SDK_ERROR",
       message: stream.error instanceof Error ? stream.error.message : String(stream.error),
+      rawMessages: stream.rawMessages,
     };
   }
 
   if (stream.resultText === undefined || stream.resultText.trim().length === 0) {
-    return { isOk: false, errorCode: "EMPTY_RESULT", message: "SDK returned no result" };
+    return { isOk: false, errorCode: "EMPTY_RESULT", message: "SDK returned no result", rawMessages: stream.rawMessages };
   }
 
   return {

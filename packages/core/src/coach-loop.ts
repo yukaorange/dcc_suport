@@ -1,10 +1,10 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { buildAgentDefinitions } from "./agents";
 import { type CapturedImage, captureScreen } from "./capture";
 import type { CoachConfig } from "./config";
 import { computeDiff } from "./diff";
-import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { checkSessionContinuity, type EngineResult, invokeClaude } from "./engine";
 import { COACH_TEMP_DIR } from "./paths";
 import type { Plan, PlanStepStatus } from "./planner";
@@ -15,8 +15,9 @@ const ADVISOR_MAX_TURNS = 20;
 const ADVISOR_TIMEOUT_MS = 600_000;
 
 const TOOL_LOG_MESSAGES: Record<string, string> = {
-  Bash: "[researcher] 動画要約中...",
-  WebSearch: "[researcher] 動画検索中...",
+  WebSearch: "[coach] スキルファイルに情報がないため、YouTube動画を検索しています...",
+  Bash: "[coach] 動画を要約しています。しばらくお待ちください...",
+  Write: "[coach] スキルファイルに知識を蓄積しています...",
 };
 
 function withToolLogging(guard: CanUseTool): CanUseTool {

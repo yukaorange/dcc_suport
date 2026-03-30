@@ -47,7 +47,7 @@ export async function extractVideoContent(youtubeUrl: string): Promise<ExtractVi
 
   const ai = new GoogleGenAI({ apiKey });
 
-  const GEMINI_TIMEOUT_MS = 60_000;
+  const GEMINI_TIMEOUT_MS = 180_000;
 
   let response: GenerateContentResponse;
   try {

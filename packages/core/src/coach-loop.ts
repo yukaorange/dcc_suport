@@ -1,5 +1,6 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { buildAgentDefinitions } from "./agents";
 import { type CapturedImage, captureScreen } from "./capture";
 import type { CoachConfig } from "./config";
@@ -9,6 +10,25 @@ import { COACH_TEMP_DIR } from "./paths";
 import type { Plan, PlanStepStatus } from "./planner";
 import { buildCoachSystemPrompt, buildCoachUserPrompt, type RestoredAdvice } from "./prompts";
 import { createToolPermissionGuard } from "./skills";
+
+const ADVISOR_MAX_TURNS = 20;
+const ADVISOR_TIMEOUT_MS = 600_000;
+
+const TOOL_LOG_MESSAGES: Record<string, string> = {
+  WebSearch: "[coach] スキルファイルに情報がないため、YouTube動画を検索しています...",
+  Bash: "[coach] 動画を要約しています。しばらくお待ちください...",
+  Write: "[coach] スキルファイルに知識を蓄積しています...",
+};
+
+function withToolLogging(guard: CanUseTool): CanUseTool {
+  return async (toolName, input, options) => {
+    const result = await guard(toolName, input, options);
+    if (result.behavior === "allow" && toolName in TOOL_LOG_MESSAGES) {
+      console.log(TOOL_LOG_MESSAGES[toolName]);
+    }
+    return result;
+  };
+}
 
 type CoachAdvice = {
   readonly content: string;
@@ -274,11 +294,11 @@ async function executeOneRound(
       previousAdvices: options.previousAdvices,
     }),
     agents: buildAgentDefinitions(),
-    tools: ["Read", "Agent"],
+    tools: ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob"],
     allowedTools: ["Read", "Agent"],
-    canUseTool: createToolPermissionGuard(),
-    maxTurns: 15,
-    timeoutMs: 120_000,
+    canUseTool: withToolLogging(createToolPermissionGuard()),
+    maxTurns: ADVISOR_MAX_TURNS,
+    timeoutMs: ADVISOR_TIMEOUT_MS,
     signal: options.signal,
   });
 

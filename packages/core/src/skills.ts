@@ -91,30 +91,55 @@ const SHELL_META_CHARS = /[;|&`$(){}!<>\n\r\t]/;
 
 const ALLOWED_READ_ROOTS = [resolve(SKILLS_ROOT), resolve(DOCS_ROOT)];
 
+function stripQuotes(s: string): string {
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+
 function validateBashCommand(
   command: string,
 ): { isValid: true } | { isValid: false; reason: string } {
-  if (SHELL_META_CHARS.test(command)) {
-    return { isValid: false, reason: "Shell meta characters are not allowed" };
+  const ALLOWED_FORMAT =
+    'Allowed: bun run packages/core/src/extract-video.ts "<youtube-url>" (URL must be quoted)';
+
+  // クォートされた URL を正しく分割するため、正規表現でパース
+  const match = command.trim().match(/^(\S+)\s+(\S+)\s+(\S+)(?:\s+(.+))?$/);
+  if (!match) {
+    return { isValid: false, reason: ALLOWED_FORMAT };
   }
 
-  const parts = command.trim().split(/\s+/);
-  if (parts.length < 3 || parts.length > 4) {
-    return { isValid: false, reason: "Expected: bun run <script> [<youtube-url>]" };
+  const [, runner, runCmd, scriptPath, rawUrl] = match;
+  if (
+    SHELL_META_CHARS.test(runner) ||
+    SHELL_META_CHARS.test(runCmd) ||
+    SHELL_META_CHARS.test(scriptPath)
+  ) {
+    return { isValid: false, reason: `Shell meta characters are not allowed. ${ALLOWED_FORMAT}` };
   }
 
-  const [runner, runCmd, scriptPath, url] = parts;
   if (runner !== "bun" || runCmd !== "run") {
-    return { isValid: false, reason: "Only 'bun run' commands are allowed" };
+    return { isValid: false, reason: `Only 'bun run' is allowed. ${ALLOWED_FORMAT}` };
   }
 
-  const resolvedScript = resolve(scriptPath);
+  const resolvedScript = resolve(stripQuotes(scriptPath));
   if (resolvedScript !== EXTRACT_VIDEO_SCRIPT) {
     return { isValid: false, reason: "Only extract-video.ts is allowed" };
   }
 
-  if (url !== undefined && !YOUTUBE_URL_PATTERN.test(url)) {
-    return { isValid: false, reason: "Argument must be a valid YouTube URL" };
+  if (rawUrl !== undefined) {
+    const isQuoted =
+      (rawUrl.startsWith('"') && rawUrl.endsWith('"')) ||
+      (rawUrl.startsWith("'") && rawUrl.endsWith("'"));
+    // & を含む URL はシェルで壊れるためクォート必須
+    if (!isQuoted && rawUrl.includes("&")) {
+      return { isValid: false, reason: `URL contains '&' and must be quoted. ${ALLOWED_FORMAT}` };
+    }
+    const url = stripQuotes(rawUrl);
+    if (!YOUTUBE_URL_PATTERN.test(url)) {
+      return { isValid: false, reason: "Argument must be a valid YouTube URL" };
+    }
   }
 
   return { isValid: true };
@@ -164,6 +189,20 @@ function checkWritePermission(
   return ALLOW;
 }
 
+const YOUTUBE_VIDEO_URL_PATTERN = /^https?:\/\/(www\.|m\.)?(youtube\.com\/watch|youtu\.be\/)/;
+
+function checkWebFetchPermission(input: Record<string, unknown>): PermissionResult {
+  const url = input.url;
+  if (typeof url === "string" && YOUTUBE_VIDEO_URL_PATTERN.test(url)) {
+    return {
+      behavior: "deny",
+      message:
+        "WebFetch denied: YouTube video pages are too large. Use WebSearch results for metadata instead.",
+    };
+  }
+  return ALLOW;
+}
+
 function checkBashPermission(input: Record<string, unknown>): PermissionResult {
   const command = input.command;
   if (typeof command !== "string") {
@@ -190,8 +229,9 @@ export function createToolPermissionGuard(): CanUseTool {
       case "Bash":
         return checkBashPermission(input);
       case "WebSearch":
-      case "WebFetch":
         return ALLOW;
+      case "WebFetch":
+        return checkWebFetchPermission(input);
       default:
         return { behavior: "deny", message: `${toolName} is not allowed for researcher` };
     }

@@ -427,7 +427,8 @@ flowchart TD
 | プロパティ | 担当関数 | 定義場所 | 役割 |
 |-----------|---------|---------|------|
 | `agents` | `buildAgentDefinitions()` | agents.ts | **誰を呼べるか**：サブエージェントの名簿。名前・説明・プロンプト・使えるツール一覧を定義 |
-| `tools` | — (リテラル `["Agent"]`) | coach-loop.ts | **親が何をできるか**：親エージェント自身の手持ちツール。`"Agent"` = サブエージェント呼び出しのみ |
+| `tools` | — (リテラル) | coach-loop.ts | **セッション全体のツール一覧**：親・サブエージェント含め、このセッションで利用可能な全ツール。ここに含まれないツールはサブエージェントにも渡されない |
+| `allowedTools` | — (リテラル) | coach-loop.ts | **親が直接使えるツール**：`tools` のサブセット。親エージェント（advisor）自身が自動承認で使えるツールを制限する |
 | `canUseTool` | `createToolPermissionGuard()` | skills.ts | **使い方が安全か**：ツール実行の直前に毎回呼ばれるコールバック。引数の内容を見て allow / deny を返す |
 
 ```mermaid
@@ -438,9 +439,14 @@ flowchart LR
         Def --> Researcher2["researcher<br>tools: Read,Write,<br>Bash,Glob,<br>WebSearch,WebFetch"]
     end
 
-    subgraph tools_prop ["tools（親が何をできるか）"]
-        Tools2["tools: 'Agent'<br>coach-loop.ts"]
-        Tools2 --> Only["親はサブエージェント<br>呼び出ししかできない"]
+    subgraph tools_prop ["tools（セッション全体のツール一覧）"]
+        Tools2["tools: Agent, Read, Write,<br>Bash, Glob, WebSearch, WebFetch<br>coach-loop.ts"]
+        Tools2 --> Menu["ここに含まれないツールは<br>サブエージェントにも渡されない"]
+    end
+
+    subgraph allowed_prop ["allowedTools（親が直接使えるツール）"]
+        Allowed["allowedTools: Read, Agent<br>coach-loop.ts"]
+        Allowed --> Restrict["advisor 自身は Read と<br>Agent のみ使用可能"]
     end
 
     subgraph canuse_prop ["canUseTool（使い方が安全か）"]
@@ -448,6 +454,27 @@ flowchart LR
         Guard2 --> Check["ツール実行の直前に<br>毎回コールバックされ<br>allow / deny を返す"]
     end
 ```
+
+#### tools と allowedTools の違い（重要）
+
+更新日: 2026-03-30
+
+`tools` と `allowedTools` は似ているが役割が異なる。混同するとサブエージェントがツールを使えなくなる。
+
+| プロパティ | スコープ | 役割 |
+|-----------|---------|------|
+| `tools` | セッション全体（親 + サブエージェント） | このセッションで「存在を認識する」ツールの一覧。ここにないツールは誰も使えない |
+| `allowedTools` | 親エージェントのみ | `tools` のうち、親が自動承認で直接使えるものを制限する |
+
+```
+tools: ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob"]
+                 ↑ セッション全体のメニュー（全員が見える）
+
+allowedTools: ["Read", "Agent"]
+                 ↑ advisor が自分で注文できるもの（advisor の制限）
+```
+
+**実例**: researcher が Bash で `extract-video.ts` を実行するには、parent の `tools` に `"Bash"` が含まれている必要がある。`allowedTools` に含まれていなくても、サブエージェントの agent 定義で `tools: ["Bash"]` と指定されていれば researcher は使える。
 
 ### 注意: createToolPermissionGuard() が実質 researcher にのみ影響する理由
 
@@ -458,7 +485,7 @@ flowchart LR
 ```mermaid
 flowchart LR
     subgraph parent ["親エージェント"]
-        PT["tools: Agent のみ"]
+        PT["allowedTools: Read, Agent"]
         PT --> PA["Agent ツールで<br>サブエージェントを呼ぶ"]
         PA -.- PG["canUseTool?<br>→ Agent の実行に対しては<br>SDK が呼ばない"]
     end
@@ -482,7 +509,7 @@ flowchart LR
 
 | エージェント | tools | canUseTool が発火するか | 理由 |
 |-------------|-------|----------------------|------|
-| 親 | `["Agent"]` | しない | SDK は Agent ツール（サブエージェント呼び出し）に対して canUseTool を呼ばない |
+| 親 | `allowedTools: ["Read", "Agent"]` | しない | SDK は Agent ツール（サブエージェント呼び出し）に対して canUseTool を呼ばない |
 | advisor | なし | しない | ツールを一切持たないので、判定を受ける機会がない |
 | researcher | 6つ | **する** | Read / Write / Bash 等を使うたびに毎回判定される |
 

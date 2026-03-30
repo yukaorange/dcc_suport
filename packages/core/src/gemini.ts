@@ -15,11 +15,25 @@ export const YOUTUBE_URL_PATTERN =
 
 const EXTRACTION_PROMPT = `この動画からDCCツールの操作手順を構造化して抽出してください。
 以下の形式で出力:
-- 使用アプリケーション名
+
+## 基本情報
+- 使用アプリケーション名（バージョンがわかれば併記）
+- 対象レベル: 初心者 / 中級者 / 上級者
+- 前提条件（必要なプラグイン、素材、事前設定など）
+
+## 概要
 - 成果物の概要と学べるテクニックの概要
+
+## 操作手順
 - 操作手順（箇条書き、メニューパスを明示）
+- 各ステップで使用するパラメータ値があれば明記
+
+## ショートカットキー
 - ショートカットキー（あれば）
-- 表現技法のポイント`;
+
+## 表現技法のポイント
+- 表現技法のポイント
+- なぜその技法を使うのか（意図・効果）`;
 
 export async function extractVideoContent(youtubeUrl: string): Promise<ExtractVideoResult> {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -32,6 +46,8 @@ export async function extractVideoContent(youtubeUrl: string): Promise<ExtractVi
   }
 
   const ai = new GoogleGenAI({ apiKey });
+
+  const GEMINI_TIMEOUT_MS = 60_000;
 
   let response: GenerateContentResponse;
   try {
@@ -46,6 +62,9 @@ export async function extractVideoContent(youtubeUrl: string): Promise<ExtractVi
           ],
         },
       ],
+      config: {
+        httpOptions: { timeout: GEMINI_TIMEOUT_MS },
+      },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

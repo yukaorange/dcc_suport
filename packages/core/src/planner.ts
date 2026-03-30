@@ -40,7 +40,10 @@ type GeneratePlanInput = {
 export type { GeneratePlanInput };
 
 const PLAN_SYSTEM_PROMPT = `あなたはDCCツールの制作プランナーです。リファレンス画像を分析し、ユーザーの目標に基づいた制作プランを生成します。
-表現技法の性質から最適なアプリを判断し、アプリ間の制作フロー（Illustrator→Photoshop等）を設計してください。`;
+表現技法の性質から最適なアプリを判断し、アプリ間の制作フロー（Illustrator→Photoshop等）を設計してください。
+
+重要: プランは制作の方向性と構成を示すものです。具体的な操作手順やメニューパスはプランに含めないでください。
+各ステップは「何を実現するか」（目的）を記述し、「どう操作するか」（手順）はコーチング中に補完されます。`;
 
 function buildPlanGenerationPrompt(input: GeneratePlanInput): string {
   if (input.revisionFeedback !== undefined && input.previousPlan !== undefined) {
@@ -75,7 +78,8 @@ ${input.goalDescription}
 ## 注意
 - 各ステップで使用するアプリケーション（Illustrator / Photoshop / After Effects等）を明示
 - 表現技法の性質から最適なアプリを判断（ベクター作業→Illustrator、テクスチャ加工→Photoshop等、エフェクト作成→After Effects等）
-- ステップは5-10個程度の粒度`;
+- ステップは5-15個程度の粒度
+- 各ステップの description は「何を実現するか」を記述する（例: 「背景にグラデーションで奥行き感を表現」）。具体的なメニュー操作やパラメータ値は含めない`;
 }
 
 function sanitizeStepField(value: string, maxLength: number): string {

@@ -91,30 +91,42 @@ const SHELL_META_CHARS = /[;|&`$(){}!<>\n\r\t]/;
 
 const ALLOWED_READ_ROOTS = [resolve(SKILLS_ROOT), resolve(DOCS_ROOT)];
 
+function stripQuotes(s: string): string {
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+
 function validateBashCommand(
   command: string,
 ): { isValid: true } | { isValid: false; reason: string } {
+  const ALLOWED_FORMAT = "Allowed: bun run packages/core/src/extract-video.ts <youtube-url>";
+
   if (SHELL_META_CHARS.test(command)) {
-    return { isValid: false, reason: "Shell meta characters are not allowed" };
+    return { isValid: false, reason: `Shell meta characters are not allowed. ${ALLOWED_FORMAT}` };
   }
 
   const parts = command.trim().split(/\s+/);
   if (parts.length < 3 || parts.length > 4) {
-    return { isValid: false, reason: "Expected: bun run <script> [<youtube-url>]" };
+    return { isValid: false, reason: ALLOWED_FORMAT };
   }
 
-  const [runner, runCmd, scriptPath, url] = parts;
+  const [runner, runCmd, scriptPath, rawUrl] = parts;
   if (runner !== "bun" || runCmd !== "run") {
-    return { isValid: false, reason: "Only 'bun run' commands are allowed" };
+    return { isValid: false, reason: `Only 'bun run' is allowed. ${ALLOWED_FORMAT}` };
   }
 
-  const resolvedScript = resolve(scriptPath);
+  const resolvedScript = resolve(stripQuotes(scriptPath));
   if (resolvedScript !== EXTRACT_VIDEO_SCRIPT) {
     return { isValid: false, reason: "Only extract-video.ts is allowed" };
   }
 
-  if (url !== undefined && !YOUTUBE_URL_PATTERN.test(url)) {
-    return { isValid: false, reason: "Argument must be a valid YouTube URL" };
+  if (rawUrl !== undefined) {
+    const url = stripQuotes(rawUrl);
+    if (!YOUTUBE_URL_PATTERN.test(url)) {
+      return { isValid: false, reason: "Argument must be a valid YouTube URL" };
+    }
   }
 
   return { isValid: true };

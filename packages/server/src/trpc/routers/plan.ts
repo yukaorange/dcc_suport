@@ -1,7 +1,7 @@
 import { generatePlan } from "@dcc/core";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { saveBase64Image } from "../../lib/image-store";
+import { saveBase64Images } from "../../lib/image-store";
 import { createTaggedLogger } from "../../lib/logger";
 import { publicProcedure, router } from "../trpc";
 
@@ -9,8 +9,16 @@ export const planRouter = router({
   generate: publicProcedure
     .input(
       z.object({
-        referenceImageBase64: z.string().max(14 * 1024 * 1024),
-        referenceFileName: z.string(),
+        referenceImages: z
+          .array(
+            z.object({
+              base64: z.string().max(14 * 1024 * 1024),
+              fileName: z.string(),
+              label: z.string().max(50).default(""),
+            }),
+          )
+          .min(1)
+          .max(5),
         goalDescription: z.string().min(5),
         revisionFeedback: z.string().optional(),
         previousPlanId: z.string().optional(),
@@ -19,19 +27,19 @@ export const planRouter = router({
     .mutation(async ({ input, ctx }) => {
       const log = createTaggedLogger("plan.generate");
       log.started();
-      log.info(
-        `fileName=${input.referenceFileName}, base64Length=${input.referenceImageBase64.length}, goal="${input.goalDescription}"`,
-      );
+      log.info(`imageCount=${input.referenceImages.length}, goal="${input.goalDescription}"`);
 
-      const imageResult = await saveBase64Image(
-        input.referenceImageBase64,
-        input.referenceFileName,
-      );
-      if (!imageResult.isOk) {
-        log.failed(`saveBase64Image: ${imageResult.message}`);
-        throw new TRPCError({ code: "BAD_REQUEST", message: imageResult.message });
+      const imagesResult = await saveBase64Images(input.referenceImages);
+      if (!imagesResult.isOk) {
+        log.failed(`saveBase64Images: ${imagesResult.message}`);
+        throw new TRPCError({ code: "BAD_REQUEST", message: imagesResult.message });
       }
-      log.info(`image saved: ${imageResult.filePath}`);
+      log.info(`images saved: ${imagesResult.filePaths.length} files`);
+
+      const referenceImages = imagesResult.filePaths.map((filePath, i) => ({
+        path: filePath,
+        label: input.referenceImages[i].label,
+      }));
 
       const previousPlan =
         input.previousPlanId !== undefined
@@ -40,7 +48,7 @@ export const planRouter = router({
 
       log.info("calling generatePlan...");
       const planResult = await generatePlan({
-        referenceImages: [{ path: imageResult.filePath, label: "" }],
+        referenceImages,
         goalDescription: input.goalDescription,
         revisionFeedback: input.revisionFeedback,
         previousPlan,
@@ -55,7 +63,7 @@ export const planRouter = router({
       const planId = crypto.randomUUID();
       ctx.pendingPlanCache.set(planId, {
         plan: planResult.plan,
-        referenceImages: [{ path: imageResult.filePath, label: "" }],
+        referenceImages,
         goalDescription: input.goalDescription,
       });
 

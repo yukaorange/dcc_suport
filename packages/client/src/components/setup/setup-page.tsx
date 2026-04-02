@@ -6,15 +6,9 @@ import { trpc } from "../../trpc";
 import { DisplaySelector } from "./display-selector";
 import { GoalInput } from "./goal-input";
 import { PlanReview } from "./plan-review";
-import { ReferenceUploader } from "./reference-uploader";
+import { type ReferenceImage, ReferenceUploader } from "./reference-uploader";
 
 type SetupPhase = "input" | "reviewing";
-
-type ImageData = {
-  readonly base64: string;
-  readonly fileName: string;
-  readonly previewUrl: string;
-};
 
 type SetupPageProps = {
   readonly onCoachingStarted: (sessionId: string) => void;
@@ -24,7 +18,7 @@ export function SetupPage({ onCoachingStarted }: SetupPageProps) {
   const [phase, setPhase] = useState<SetupPhase>("input");
   const [displayId, setDisplayId] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [imageData, setImageData] = useState<ImageData | null>(null);
+  const [referenceImages, setReferenceImages] = useState<readonly ReferenceImage[]>([]);
   const [goal, setGoal] = useState("");
   const [planId, setPlanId] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -32,19 +26,17 @@ export function SetupPage({ onCoachingStarted }: SetupPageProps) {
   const generateMutation = trpc.plan.generate.useMutation();
   const startMutation = trpc.setup.start.useMutation();
 
-  const isInputValid = displayId !== "" && imageData !== null && goal.length >= 5;
-
-  const handleFileSelected = (base64: string, fileName: string) => {
-    const previewUrl = `data:image/*;base64,${base64}`;
-    setImageData({ base64, fileName, previewUrl });
-  };
+  const isInputValid = displayId !== "" && referenceImages.length > 0 && goal.length >= 5;
 
   const handleGeneratePlan = async () => {
-    if (imageData === null) return;
+    if (referenceImages.length === 0) return;
 
     const result = await generateMutation.mutateAsync({
-      referenceImageBase64: imageData.base64,
-      referenceFileName: imageData.fileName,
+      referenceImages: referenceImages.map((img) => ({
+        base64: img.base64,
+        fileName: img.fileName,
+        label: img.label,
+      })),
       goalDescription: goal,
     });
 
@@ -54,11 +46,14 @@ export function SetupPage({ onCoachingStarted }: SetupPageProps) {
   };
 
   const handleRegenerate = async (feedback: string) => {
-    if (imageData === null || planId === null) return;
+    if (referenceImages.length === 0 || planId === null) return;
 
     const result = await generateMutation.mutateAsync({
-      referenceImageBase64: imageData.base64,
-      referenceFileName: imageData.fileName,
+      referenceImages: referenceImages.map((img) => ({
+        base64: img.base64,
+        fileName: img.fileName,
+        label: img.label,
+      })),
       goalDescription: goal,
       revisionFeedback: feedback,
       previousPlanId: planId,
@@ -95,10 +90,7 @@ export function SetupPage({ onCoachingStarted }: SetupPageProps) {
                 setDisplayName(name);
               }}
             />
-            <ReferenceUploader
-              onFileSelected={handleFileSelected}
-              previewUrl={imageData?.previewUrl ?? null}
-            />
+            <ReferenceUploader images={referenceImages} onImagesChanged={setReferenceImages} />
             <GoalInput value={goal} onChange={setGoal} />
 
             {generateMutation.error !== null && (

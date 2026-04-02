@@ -10,8 +10,13 @@ import {
   updatePlanStepStatus,
 } from "../../db/plans";
 import { advices, plans, sessions } from "../../db/schema";
-import { copyReferenceImages, findSessionImagesByType } from "../../db/session-images";
+import {
+  copyReferenceImages,
+  findSessionImagesByType,
+  insertSessionImages,
+} from "../../db/session-images";
 import { endSession, findSessionById, listSessionsWithPlanSteps } from "../../db/sessions";
+import { saveBase64Images } from "../../lib/image-store";
 import { createTaggedLogger } from "../../lib/logger";
 import { schedulePurge } from "../../lib/start-session";
 import { publicProcedure, router } from "../trpc";
@@ -76,16 +81,53 @@ export const sessionRouter = router({
   }),
 
   sendMessage: publicProcedure
-    .input(z.object({ sessionId: z.string().uuid(), message: z.string().min(1).max(2000) }))
-    .mutation(({ input, ctx }) => {
+    .input(
+      z
+        .object({
+          sessionId: z.string().uuid(),
+          message: z.string().max(2000).optional(),
+          images: z
+            .array(
+              z.object({
+                base64: z.string().max(14 * 1024 * 1024),
+                fileName: z.string(),
+              }),
+            )
+            .max(3)
+            .optional(),
+        })
+        .refine(
+          (data) =>
+            (data.message !== undefined && data.message.length > 0) ||
+            (data.images !== undefined && data.images.length > 0),
+          { message: "メッセージまたは画像のいずれかは必須です" },
+        ),
+    )
+    .mutation(async ({ input, ctx }) => {
       const log = createTaggedLogger("session.sendMessage");
       log.info(
-        `sessionId=${input.sessionId}, message="${input.message.slice(0, 50).replace(/[\r\n]/g, " ")}"`,
+        `sessionId=${input.sessionId}, message="${(input.message ?? "").slice(0, 50).replace(/[\r\n]/g, " ")}", images=${input.images?.length ?? 0}`,
       );
 
+      let imagePaths: string[] = [];
+      if (input.images !== undefined && input.images.length > 0) {
+        const imagesResult = await saveBase64Images(input.images);
+        if (!imagesResult.isOk) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: imagesResult.message });
+        }
+        imagePaths = [...imagesResult.filePaths];
+
+        insertSessionImages(
+          ctx.db,
+          input.sessionId,
+          imagePaths.map((p) => ({ filePath: p, label: "" })),
+          "attachment",
+        );
+      }
+
       const result = ctx.coachSession.submitMessage(input.sessionId, {
-        text: input.message,
-        imagePaths: [],
+        text: input.message ?? "",
+        imagePaths,
       });
       if (!result.isOk) {
         throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });

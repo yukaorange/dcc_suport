@@ -98,16 +98,42 @@ function stripQuotes(s: string): string {
   return s;
 }
 
-function validateBashCommand(
-  command: string,
-): { isValid: true } | { isValid: false; reason: string } {
-  const ALLOWED_FORMAT =
-    'Allowed: bun run packages/core/src/extract-video.ts "<youtube-url>" (URL must be quoted)';
+const BASH_ALLOWED_FORMAT =
+  'Allowed: bun run packages/core/src/extract-video.ts "<youtube-url>" (URL must be quoted)';
 
-  // クォートされた URL を正しく分割するため、正規表現でパース
-  const match = command.trim().match(/^(\S+)\s+(\S+)\s+(\S+)(?:\s+(.+))?$/);
+function isAllowedScript(scriptPath: string): boolean {
+  const scriptName = stripQuotes(scriptPath);
+  const isAbsoluteMatch = resolve(scriptName) === EXTRACT_VIDEO_SCRIPT;
+  const isRelativeMatch = EXTRACT_VIDEO_SCRIPT.endsWith(scriptName.replace(/^\.\//, ""));
+  return isAbsoluteMatch || isRelativeMatch;
+}
+
+type ValidationResult = { isValid: true } | { isValid: false; reason: string };
+
+function validateUrlArg(rawUrl: string): ValidationResult {
+  const isQuoted =
+    (rawUrl.startsWith('"') && rawUrl.endsWith('"')) ||
+    (rawUrl.startsWith("'") && rawUrl.endsWith("'"));
+  if (!isQuoted && rawUrl.includes("&")) {
+    return {
+      isValid: false,
+      reason: `URL contains '&' and must be quoted. ${BASH_ALLOWED_FORMAT}`,
+    };
+  }
+  const url = stripQuotes(rawUrl);
+  if (!YOUTUBE_URL_PATTERN.test(url)) {
+    return { isValid: false, reason: "Argument must be a valid YouTube URL" };
+  }
+  return { isValid: true };
+}
+
+export function validateBashCommand(command: string): ValidationResult {
+  // LLM が `cd <dir> && bun run ...` の形式で生成するケースに対応
+  const stripped = command.trim().replace(/^cd\s+(?:"[^"]+"|'[^']+'|\S+)\s*&&\s*/, "");
+
+  const match = stripped.trim().match(/^(\S+)\s+(\S+)\s+(\S+)(?:\s+(.+))?$/);
   if (!match) {
-    return { isValid: false, reason: ALLOWED_FORMAT };
+    return { isValid: false, reason: BASH_ALLOWED_FORMAT };
   }
 
   const [, runner, runCmd, scriptPath, rawUrl] = match;
@@ -116,30 +142,22 @@ function validateBashCommand(
     SHELL_META_CHARS.test(runCmd) ||
     SHELL_META_CHARS.test(scriptPath)
   ) {
-    return { isValid: false, reason: `Shell meta characters are not allowed. ${ALLOWED_FORMAT}` };
+    return {
+      isValid: false,
+      reason: `Shell meta characters are not allowed. ${BASH_ALLOWED_FORMAT}`,
+    };
   }
 
   if (runner !== "bun" || runCmd !== "run") {
-    return { isValid: false, reason: `Only 'bun run' is allowed. ${ALLOWED_FORMAT}` };
+    return { isValid: false, reason: `Only 'bun run' is allowed. ${BASH_ALLOWED_FORMAT}` };
   }
 
-  const resolvedScript = resolve(stripQuotes(scriptPath));
-  if (resolvedScript !== EXTRACT_VIDEO_SCRIPT) {
+  if (!isAllowedScript(scriptPath)) {
     return { isValid: false, reason: "Only extract-video.ts is allowed" };
   }
 
   if (rawUrl !== undefined) {
-    const isQuoted =
-      (rawUrl.startsWith('"') && rawUrl.endsWith('"')) ||
-      (rawUrl.startsWith("'") && rawUrl.endsWith("'"));
-    // & を含む URL はシェルで壊れるためクォート必須
-    if (!isQuoted && rawUrl.includes("&")) {
-      return { isValid: false, reason: `URL contains '&' and must be quoted. ${ALLOWED_FORMAT}` };
-    }
-    const url = stripQuotes(rawUrl);
-    if (!YOUTUBE_URL_PATTERN.test(url)) {
-      return { isValid: false, reason: "Argument must be a valid YouTube URL" };
-    }
+    return validateUrlArg(rawUrl);
   }
 
   return { isValid: true };
@@ -189,20 +207,6 @@ function checkWritePermission(
   return ALLOW;
 }
 
-const YOUTUBE_VIDEO_URL_PATTERN = /^https?:\/\/(www\.|m\.)?(youtube\.com\/watch|youtu\.be\/)/;
-
-function checkWebFetchPermission(input: Record<string, unknown>): PermissionResult {
-  const url = input.url;
-  if (typeof url === "string" && YOUTUBE_VIDEO_URL_PATTERN.test(url)) {
-    return {
-      behavior: "deny",
-      message:
-        "WebFetch denied: YouTube video pages are too large. Use WebSearch results for metadata instead.",
-    };
-  }
-  return ALLOW;
-}
-
 function checkBashPermission(input: Record<string, unknown>): PermissionResult {
   const command = input.command;
   if (typeof command !== "string") {
@@ -229,9 +233,8 @@ export function createToolPermissionGuard(): CanUseTool {
       case "Bash":
         return checkBashPermission(input);
       case "WebSearch":
-        return ALLOW;
       case "WebFetch":
-        return checkWebFetchPermission(input);
+        return ALLOW;
       default:
         return { behavior: "deny", message: `${toolName} is not allowed for researcher` };
     }

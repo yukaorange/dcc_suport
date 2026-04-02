@@ -166,6 +166,32 @@ describe("createToolPermissionGuard", () => {
     expect(result.behavior).toBe("allow");
   });
 
+  test("cd 前置き付きの extract-video.ts 実行はallowされる", async () => {
+    const guard = createToolPermissionGuard();
+    const result = await guard(
+      "Bash",
+      {
+        command:
+          'cd /tmp && bun run packages/core/src/extract-video.ts "https://www.youtube.com/shorts/5rAsHyXT3Gw?app=desktop"',
+      },
+      GUARD_OPTIONS,
+    );
+    expect(result.behavior).toBe("allow");
+  });
+
+  test("スペースを含む quoted な cd 前置きでも allow される", async () => {
+    const guard = createToolPermissionGuard();
+    const result = await guard(
+      "Bash",
+      {
+        command:
+          'cd "/tmp/my project" && bun run packages/core/src/extract-video.ts "https://www.youtube.com/shorts/5rAsHyXT3Gw?app=desktop"',
+      },
+      GUARD_OPTIONS,
+    );
+    expect(result.behavior).toBe("allow");
+  });
+
   test("任意のBashコマンドはdenyされる", async () => {
     const guard = createToolPermissionGuard();
     const result = await guard("Bash", { command: "rm -rf /" }, GUARD_OPTIONS);

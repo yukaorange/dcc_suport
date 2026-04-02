@@ -11,7 +11,7 @@ type ExtractVideoResult =
 export type { ExtractVideoResult };
 
 export const YOUTUBE_URL_PATTERN =
-  /^https?:\/\/(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[a-zA-Z0-9_-]+([?&][a-zA-Z0-9_=-]*)*$/;
+  /^https?:\/\/(www\.)?(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)[a-zA-Z0-9_-]+([?&][a-zA-Z0-9_=-]*)*$/;
 
 const EXTRACTION_PROMPT = `この動画からDCCツールの操作手順を構造化して抽出してください。
 以下の形式で出力:

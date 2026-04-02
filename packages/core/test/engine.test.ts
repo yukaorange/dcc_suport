@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { extractToolUses } from "../src/engine";
 import type { EngineResult } from "../src/index";
 import { checkSessionContinuity } from "../src/index";
 
@@ -61,5 +62,66 @@ describe("checkSessionContinuity", () => {
     const result = checkSessionContinuity(success, true);
 
     expect(result.continuable).toBe(true);
+  });
+});
+
+describe("extractToolUses", () => {
+  test("name と input の間に別キーがあっても tool_use を抽出できる", () => {
+    const message = {
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            name: "Bash",
+            id: "toolu_123",
+            input: {
+              command:
+                'cd /tmp && bun run packages/core/src/extract-video.ts "https://www.youtube.com/shorts/5rAsHyXT3Gw?app=desktop"',
+            },
+          },
+        ],
+      },
+    };
+
+    expect(extractToolUses(message)).toEqual([
+      {
+        toolName: "Bash",
+        input: {
+          command:
+            'cd /tmp && bun run packages/core/src/extract-video.ts "https://www.youtube.com/shorts/5rAsHyXT3Gw?app=desktop"',
+        },
+      },
+    ]);
+  });
+
+  test("input に入れ子オブジェクトがあっても壊れない", () => {
+    const message = {
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            name: "Write",
+            input: {
+              file_path: "/tmp/test.md",
+              metadata: { source: "coach", round: 1 },
+            },
+          },
+        ],
+      },
+    };
+
+    expect(extractToolUses(message)).toEqual([
+      {
+        toolName: "Write",
+        input: {
+          file_path: "/tmp/test.md",
+          metadata: { source: "coach", round: 1 },
+        },
+      },
+    ]);
   });
 });

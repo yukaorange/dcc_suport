@@ -61,8 +61,11 @@ export function buildCoachSystemPrompt(input: CoachSystemPromptInput): string {
 - ユーザーの質問には、現在の画面の状況を踏まえた具体的な回答を心がける。
 - ユーザーが方針を伝えてきた場合は、それを以降のアドバイスの前提として記憶する。
 - より正確な回答が必要だと判断した場合は、WebSearchで調べて回答を補強できる。
-- ユーザーがYouTube URLを含むメッセージを送ってきた場合、そのURLの動画をBashで要約して回答に活用する:
-  \`bun run packages/core/src/extract-video.ts "<youtube-url>"\`
+
+### YouTube URL を受け取った場合
+ユーザーのメッセージに YouTube URL が含まれている場合、**WebFetch ではなく Bash** で動画を要約する。
+YouTube ページは巨大なため WebFetch では取得できない。必ず以下のコマンドを使うこと:
+\`bun run packages/core/src/extract-video.ts "<youtube-url>"\`
 
 ## 出力フォーマット
 - アドバイスがある場合: 簡潔に日本語で1〜3文で伝える。

@@ -1,10 +1,10 @@
-import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { buildAgentDefinitions } from "../agents";
 import { invokeClaude } from "../engine";
+import { buildCoachSystemPrompt } from "../prompts";
 import { createToolPermissionGuard } from "../skills";
 import { printVerifyResult, type VerifyResult } from "./types";
 
-const VERIFY_NAME = "youtube research flow (root direct)";
+const VERIFY_NAME = "youtube url extract flow (root direct)";
 
 type FlowTrace = {
   readonly webSearchExecuted: boolean;
@@ -29,15 +29,6 @@ function traceFlow(rawMessages: readonly unknown[]): FlowTrace {
 }
 
 function diagnoseTrace(trace: FlowTrace): (VerifyResult & { status: "fail" }) | null {
-  if (!trace.webSearchExecuted) {
-    return {
-      status: "fail",
-      name: VERIFY_NAME,
-      durationMs: 0,
-      error: "WebSearch の痕跡なし。root が動画検索を実行しなかった",
-      fallback: "prompts.ts の YouTube 動画リサーチセクションを確認する",
-    };
-  }
   if (!trace.bashExecuted) {
     return {
       status: "fail",
@@ -48,16 +39,6 @@ function diagnoseTrace(trace: FlowTrace): (VerifyResult & { status: "fail" }) | 
     };
   }
   return null;
-}
-
-function withVerifyLogging(guard: CanUseTool): CanUseTool {
-  return async (toolName, input, options) => {
-    const result = await guard(toolName, input, options);
-    const status = result.behavior === "allow" ? "ALLOW" : "DENY";
-    const detail = toolName === "Bash" ? ` command=${(input as { command?: string }).command}` : "";
-    console.log(`[verify] ${toolName} → ${status}${detail}`);
-    return result;
-  };
 }
 
 function dumpFlowSummary(rawMessages: readonly unknown[]): void {
@@ -85,14 +66,24 @@ export async function verifyAgentWithGuard(): Promise<VerifyResult> {
 
   const result = await invokeClaude({
     prompt: [
-      "Photoshopのレイヤーマスクの使い方についてYouTube動画リサーチを実施してください。",
-      "WebSearchで候補を検索し、メタデータで1本選定して extract-video.ts で要約してください。",
-      "スキルファイルへの書き戻しは不要です。",
+      "この動画を確認して、内容をもとにアドバイスを考えてください。",
+      "https://www.youtube.com/watch?v=LoFCBi0IzqE",
     ].join("\n"),
+    appendSystemPrompt: buildCoachSystemPrompt({
+      referenceImagePath: null,
+      plan: null,
+      skillManifest: null,
+      previousAdvices: [],
+    }),
     agents: buildAgentDefinitions(),
     tools: ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob"],
-    allowedTools: ["Read", "Agent"],
-    canUseTool: withVerifyLogging(createToolPermissionGuard()),
+    allowedTools: ["Read", "Agent", "Bash", "WebSearch", "Write"],
+    canUseTool: createToolPermissionGuard(),
+    onToolUse: (toolName, input) => {
+      const detail =
+        toolName === "Bash" ? ` command=${(input as { command?: string }).command}` : "";
+      console.log(`[verify] ${toolName}${detail}`);
+    },
     model: "sonnet",
     timeoutMs: 600_000,
     maxTurns: 100,
@@ -110,6 +101,8 @@ export async function verifyAgentWithGuard(): Promise<VerifyResult> {
       fallback: "engine エラー。SDK ログを確認する",
     };
   }
+
+  dumpFlowSummary(result.rawMessages);
 
   const trace = traceFlow(result.rawMessages);
   const failure = diagnoseTrace(trace);

@@ -27,6 +27,15 @@ export type EngineResult = EngineSuccess | EngineFailure;
 
 const MAX_TIMEOUT_MS = 600_000;
 
+type SandboxSettings = {
+  enabled?: boolean;
+  autoAllowBashIfSandboxed?: boolean;
+  filesystem?: {
+    allowWrite?: string[];
+    denyWrite?: string[];
+  };
+};
+
 export type InvokeClaudeOptions = {
   readonly prompt: string;
   readonly sessionId?: string;
@@ -35,6 +44,8 @@ export type InvokeClaudeOptions = {
   readonly tools?: readonly string[];
   readonly allowedTools?: readonly string[];
   readonly canUseTool?: CanUseTool;
+  readonly onToolUse?: (toolName: string, input: Record<string, unknown>) => void;
+  readonly sandbox?: SandboxSettings;
   readonly model?: string;
   readonly maxTurns?: number;
   readonly timeoutMs?: number;
@@ -163,6 +174,10 @@ function buildQueryOptions(options: InvokeClaudeOptions): SDKOptions {
     queryOptions.canUseTool = options.canUseTool;
   }
 
+  if (options.sandbox) {
+    queryOptions.sandbox = options.sandbox;
+  }
+
   if (options.model) {
     queryOptions.model = options.model;
   }
@@ -181,6 +196,44 @@ type StreamResult = {
   readonly error: unknown | null;
 };
 
+type ToolUse = {
+  readonly toolName: string;
+  readonly input: Record<string, unknown>;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+export function extractToolUses(message: unknown): readonly ToolUse[] {
+  if (!isRecord(message)) return [];
+
+  const toolUses: ToolUse[] = [];
+  const seen = new WeakSet<object>();
+
+  const visit = (value: unknown): void => {
+    if (!isRecord(value)) return;
+    if (seen.has(value)) return;
+    seen.add(value);
+
+    if (
+      value.type === "tool_use" &&
+      typeof value.name === "string" &&
+      isRecord(value.input) &&
+      !Array.isArray(value.input)
+    ) {
+      toolUses.push({ toolName: value.name, input: value.input });
+    }
+
+    for (const child of Object.values(value)) {
+      visit(child);
+    }
+  };
+
+  visit(message);
+  return toolUses;
+}
+
 // queryStream のデータフロー:
 //
 //   engine.ts          SDK (query)         claude CLI         Anthropic API
@@ -190,10 +243,23 @@ type StreamResult = {
 //       │  next()             │  next()
 //       ▼                     ▼
 //   message を処理      chunk を yield
+function detectToolUse(
+  message: unknown,
+  onToolUse: ((toolName: string, input: Record<string, unknown>) => void) | undefined,
+): void {
+  if (!onToolUse) return;
+
+  for (const toolUse of extractToolUses(message)) {
+    // @throws — onToolUse が危険なコマンドを検出して throw した場合、セッションを中断する
+    onToolUse(toolUse.toolName, toolUse.input);
+  }
+}
+
 async function consumeQueryStream(
   prompt: string,
   queryOptions: SDKOptions,
   abortController: AbortController,
+  onToolUse?: (toolName: string, input: Record<string, unknown>) => void,
 ): Promise<StreamResult> {
   const rawMessages: unknown[] = [];
   let sessionId: string | undefined;
@@ -207,6 +273,7 @@ async function consumeQueryStream(
 
     for await (const message of queryStream) {
       rawMessages.push(message);
+      detectToolUse(message, onToolUse);
       const extracted = extractFromMessage(message);
       if (extracted.sessionId) sessionId = extracted.sessionId;
       if (extracted.resultText) resultText = extracted.resultText;
@@ -242,9 +309,12 @@ export async function invokeClaude(options: InvokeClaudeOptions): Promise<Engine
   const onExternalAbort = () => abortController.abort();
   options.signal?.addEventListener("abort", onExternalAbort, { once: true });
 
-  const stream = await consumeQueryStream(options.prompt, queryOptions, abortController).finally(
-    () => releaseQueryLock(myStartTime),
-  );
+  const stream = await consumeQueryStream(
+    options.prompt,
+    queryOptions,
+    abortController,
+    options.onToolUse,
+  ).finally(() => releaseQueryLock(myStartTime));
 
   clearTimeout(timer);
   options.signal?.removeEventListener("abort", onExternalAbort);

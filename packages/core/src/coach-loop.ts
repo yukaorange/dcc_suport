@@ -1,33 +1,50 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
+import { join, resolve, sep } from "node:path";
 import { buildAgentDefinitions } from "./agents";
 import { type CapturedImage, captureScreen } from "./capture";
 import type { CoachConfig } from "./config";
 import { computeDiff } from "./diff";
 import { checkSessionContinuity, type EngineResult, invokeClaude } from "./engine";
-import { COACH_TEMP_DIR } from "./paths";
+import { COACH_TEMP_DIR, SKILLS_ROOT } from "./paths";
 import type { Plan, PlanStepStatus } from "./planner";
 import { buildCoachSystemPrompt, buildCoachUserPrompt, type RestoredAdvice } from "./prompts";
-import { createToolPermissionGuard } from "./skills";
+import { createToolPermissionGuard, validateBashCommand } from "./skills";
 
 const ADVISOR_MAX_TURNS = 20;
 const ADVISOR_TIMEOUT_MS = 600_000;
 
 const TOOL_LOG_MESSAGES: Record<string, string> = {
-  WebSearch: "[coach] スキルファイルに情報がないため、YouTube動画を検索しています...",
+  WebSearch: "[coach] YouTube動画を検索しています...",
   Bash: "[coach] 動画を要約しています。しばらくお待ちください...",
   Write: "[coach] スキルファイルに知識を蓄積しています...",
 };
 
-function withToolLogging(guard: CanUseTool): CanUseTool {
-  return async (toolName, input, options) => {
-    const result = await guard(toolName, input, options);
-    if (result.behavior === "allow" && toolName in TOOL_LOG_MESSAGES) {
-      console.log(TOOL_LOG_MESSAGES[toolName]);
+// allowedTools は canUseTool をスキップするため、onToolUse で安全チェックを行う
+function handleToolUse(toolName: string, input: Record<string, unknown>): void {
+  if (toolName in TOOL_LOG_MESSAGES) {
+    console.log(TOOL_LOG_MESSAGES[toolName]);
+  }
+
+  switch (toolName) {
+    case "Bash": {
+      const command = input.command;
+      if (typeof command !== "string" || !validateBashCommand(command).isValid) {
+        throw new Error(`[coach] 不正なBashコマンドを検出。セッションを中断: ${command}`);
+      }
+      break;
     }
-    return result;
-  };
+    case "Write": {
+      const filePath = input.file_path;
+      if (typeof filePath === "string") {
+        const resolved = resolve(filePath);
+        const skillsRoot = resolve(SKILLS_ROOT);
+        if (resolved !== skillsRoot && !resolved.startsWith(skillsRoot + sep)) {
+          throw new Error(`[coach] skills/ 外への書き込みを検出。セッションを中断: ${filePath}`);
+        }
+      }
+      break;
+    }
+  }
 }
 
 type CoachAdvice = {
@@ -295,8 +312,9 @@ async function executeOneRound(
     }),
     agents: buildAgentDefinitions(),
     tools: ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob"],
-    allowedTools: ["Read", "Agent"],
-    canUseTool: withToolLogging(createToolPermissionGuard()),
+    allowedTools: ["Read", "Agent", "Bash", "WebSearch", "Write"],
+    canUseTool: createToolPermissionGuard(),
+    onToolUse: handleToolUse,
     maxTurns: ADVISOR_MAX_TURNS,
     timeoutMs: ADVISOR_TIMEOUT_MS,
     signal: options.signal,

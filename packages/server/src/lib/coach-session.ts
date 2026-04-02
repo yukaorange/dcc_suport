@@ -36,6 +36,7 @@ type SubmitMessageResult =
 
 type CoachSessionHandle = {
   readonly getActiveSessionId: () => string | null;
+  readonly isSessionActive: (sessionId: string) => boolean;
   readonly start: (options: StartOptions) => Promise<void>;
   readonly stop: () => void;
   readonly submitMessage: (sessionId: string, message: UserMessage) => SubmitMessageResult;
@@ -145,6 +146,10 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
             activeState = null;
           }
         });
+    },
+
+    isSessionActive: (sessionId) => {
+      return activeState !== null && activeState.sessionId === sessionId;
     },
 
     submitMessage: (sessionId, message) => {

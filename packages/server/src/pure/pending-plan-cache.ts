@@ -1,3 +1,4 @@
+import { unlink } from "node:fs/promises";
 import type { Plan } from "@dcc/core";
 
 const TTL_MS = 30 * 60 * 1000;
@@ -21,6 +22,12 @@ type PendingPlanCache = {
 
 export type { PendingPlan, PendingPlanCache };
 
+function cleanupImages(pending: PendingPlan): void {
+  for (const img of pending.referenceImages) {
+    unlink(img.path).catch(() => {});
+  }
+}
+
 export function createPendingPlanCache(): PendingPlanCache {
   const cache = new Map<string, CacheEntry>();
 
@@ -28,6 +35,7 @@ export function createPendingPlanCache(): PendingPlanCache {
     const now = Date.now();
     for (const [id, entry] of cache) {
       if (entry.expiresAt <= now) {
+        cleanupImages(entry.pending);
         cache.delete(id);
       }
     }
@@ -42,6 +50,7 @@ export function createPendingPlanCache(): PendingPlanCache {
       const entry = cache.get(id);
       if (entry === undefined) return null;
       if (entry.expiresAt <= Date.now()) {
+        cleanupImages(entry.pending);
         cache.delete(id);
         return null;
       }

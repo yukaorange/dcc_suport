@@ -109,6 +109,13 @@ export const sessionRouter = router({
         `sessionId=${input.sessionId}, message="${(input.message ?? "").slice(0, 50).replace(/[\r\n]/g, " ")}", images=${input.images?.length ?? 0}`,
       );
 
+      if (!ctx.coachSession.isSessionActive(input.sessionId)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "アクティブなセッションが見つかりません",
+        });
+      }
+
       let imagePaths: string[] = [];
       if (input.images !== undefined && input.images.length > 0) {
         const imagesResult = await saveBase64Images(input.images);

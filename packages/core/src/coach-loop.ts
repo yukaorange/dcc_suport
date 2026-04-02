@@ -47,6 +47,13 @@ function handleToolUse(toolName: string, input: Record<string, unknown>): void {
   }
 }
 
+type UserMessage = {
+  readonly text: string;
+  readonly imagePaths: readonly string[];
+};
+
+export type { UserMessage };
+
 type CoachAdvice = {
   readonly content: string;
   readonly roundIndex: number;
@@ -74,17 +81,17 @@ type LoopEvent =
 export type { LoopEvent, CoachAdvice };
 
 type MessageBox = {
-  readonly submit: (message: string) => void;
-  readonly consume: () => string | null;
+  readonly submit: (message: UserMessage) => void;
+  readonly consume: () => UserMessage | null;
   readonly awaitMessage: () => Promise<void>;
 };
 
 function createMessageBox(): MessageBox {
-  const queue: string[] = [];
+  const queue: UserMessage[] = [];
   let wakeResolve: (() => void) | null = null;
 
   return {
-    submit: (message: string) => {
+    submit: (message: UserMessage) => {
       queue.push(message);
       wakeResolve?.();
     },
@@ -103,7 +110,7 @@ type CoachLoopOptions = {
   readonly signal: AbortSignal;
   readonly onEvent: (event: LoopEvent) => void;
   readonly displayId?: string;
-  readonly referenceImagePath: string | null;
+  readonly referenceImages: readonly { readonly path: string; readonly label: string }[];
   readonly plan: Plan | null;
   readonly skillManifest: string | null;
   readonly previousAdvices: readonly RestoredAdvice[];
@@ -111,7 +118,7 @@ type CoachLoopOptions = {
 
 type CoachLoopHandle = {
   readonly loopFinished: Promise<void>;
-  readonly submitMessage: (message: string) => void;
+  readonly submitMessage: (message: UserMessage) => void;
 };
 
 export type { CoachLoopOptions, CoachLoopHandle };
@@ -256,12 +263,12 @@ function sleepOrUserInput(
 async function executeOneRound(
   state: LoopState,
   options: CoachLoopOptions,
-  userMessage: string | null,
+  userMessage: UserMessage | null,
 ): Promise<LoopState> {
   const { config, onEvent } = options;
 
   if (userMessage !== null) {
-    onEvent({ kind: "user_message_received", message: userMessage });
+    onEvent({ kind: "user_message_received", message: userMessage.text });
   }
 
   // @throws — OS レベルのキャプチャ失敗
@@ -300,12 +307,12 @@ async function executeOneRound(
       screenshotPath,
       isFirstRound,
       userMessage,
-      referenceImagePath: options.referenceImagePath,
+      referenceImages: options.referenceImages,
       plan: state.plan,
     }),
     sessionId: state.sessionId,
     appendSystemPrompt: buildCoachSystemPrompt({
-      referenceImagePath: options.referenceImagePath,
+      referenceImages: options.referenceImages,
       plan: state.plan,
       skillManifest: options.skillManifest,
       previousAdvices: options.previousAdvices,

@@ -47,12 +47,12 @@ const setupResult = await runSetupFlow(abortController.signal, {
 });
 
 let displayId: string | undefined;
-let referenceImagePath: string | null = null;
+let referenceImages: readonly { readonly path: string; readonly label: string }[] = [];
 let plan: Plan | null = null;
 
 if (setupResult.isOk) {
   displayId = setupResult.setup.displayId;
-  referenceImagePath = setupResult.setup.referenceImagePath;
+  referenceImages = [{ path: setupResult.setup.referenceImagePath, label: "" }];
   plan = setupResult.setup.plan;
   printSetupEvent({ kind: "setup_complete", displayName: setupResult.setup.displayName });
 } else {
@@ -91,7 +91,7 @@ const { loopFinished, submitMessage } = startCoachLoop({
   signal: abortController.signal,
   onEvent: printLoopEvent,
   displayId,
-  referenceImagePath,
+  referenceImages,
   plan,
   skillManifest,
   previousAdvices: [],
@@ -100,7 +100,7 @@ const { loopFinished, submitMessage } = startCoachLoop({
 rl.on("line", (line) => {
   const trimmed = line.trim();
   if (trimmed.length > 0) {
-    submitMessage(trimmed);
+    submitMessage({ text: trimmed, imagePaths: [] });
   }
 });
 

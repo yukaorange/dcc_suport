@@ -40,7 +40,7 @@ export const planRouter = router({
 
       log.info("calling generatePlan...");
       const planResult = await generatePlan({
-        referenceImagePath: imageResult.filePath,
+        referenceImages: [{ path: imageResult.filePath, label: "" }],
         goalDescription: input.goalDescription,
         revisionFeedback: input.revisionFeedback,
         previousPlan,
@@ -55,7 +55,7 @@ export const planRouter = router({
       const planId = crypto.randomUUID();
       ctx.pendingPlanCache.set(planId, {
         plan: planResult.plan,
-        referenceImagePath: imageResult.filePath,
+        referenceImages: [{ path: imageResult.filePath, label: "" }],
         goalDescription: input.goalDescription,
       });
 

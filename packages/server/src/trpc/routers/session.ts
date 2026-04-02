@@ -10,6 +10,7 @@ import {
   updatePlanStepStatus,
 } from "../../db/plans";
 import { advices, plans, sessions } from "../../db/schema";
+import { copyReferenceImages, findSessionImagesByType } from "../../db/session-images";
 import { endSession, findSessionById, listSessionsWithPlanSteps } from "../../db/sessions";
 import { createTaggedLogger } from "../../lib/logger";
 import { schedulePurge } from "../../lib/start-session";
@@ -82,7 +83,10 @@ export const sessionRouter = router({
         `sessionId=${input.sessionId}, message="${input.message.slice(0, 50).replace(/[\r\n]/g, " ")}"`,
       );
 
-      const result = ctx.coachSession.submitMessage(input.sessionId, input.message);
+      const result = ctx.coachSession.submitMessage(input.sessionId, {
+        text: input.message,
+        imagePaths: [],
+      });
       if (!result.isOk) {
         throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });
       }
@@ -128,7 +132,6 @@ export const sessionRouter = router({
           .values({
             id: sessionId,
             goal: session.goal,
-            referenceImagePath: session.referenceImagePath,
             displayId: session.displayId,
             displayName: session.displayName,
           })
@@ -172,11 +175,17 @@ export const sessionRouter = router({
         log.info(`copied ${sourceAdvices.length} advices as restored`);
       });
 
+      copyReferenceImages(ctx.db, input.id, sessionId);
+
       // Phase 2: コーチングループ起動（全DB書き込み成功後のみ到達）
       const restoredAdvices = findAdvicesBySessionId(ctx.db, sessionId).map((a) => ({
         content: a.content,
         roundIndex: a.roundIndex,
       }));
+
+      const referenceImages = findSessionImagesByType(ctx.db, sessionId, "reference").map(
+        (img) => ({ path: img.filePath, label: img.label }),
+      );
 
       log.info("starting coach loop for restored session...");
       try {
@@ -184,7 +193,7 @@ export const sessionRouter = router({
           sessionId,
           planId,
           displayId: session.displayId,
-          referenceImagePath: session.referenceImagePath,
+          referenceImages,
           plan,
           previousAdvices: restoredAdvices,
         });

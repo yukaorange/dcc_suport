@@ -4,7 +4,7 @@ const TTL_MS = 30 * 60 * 1000;
 
 type PendingPlan = {
   readonly plan: Plan;
-  readonly referenceImagePath: string;
+  readonly referenceImages: readonly { readonly path: string; readonly label: string }[];
   readonly goalDescription: string;
 };
 

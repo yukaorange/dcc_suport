@@ -15,6 +15,13 @@
       "when": 1773829951284,
       "tag": "0001_old_kylun",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1774900000000,
+      "tag": "0002_session_images",
+      "breakpoints": true
     }
   ]
 }

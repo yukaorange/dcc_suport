@@ -142,7 +142,7 @@ export async function runSetupFlow(
   // 4. プラン生成
   const resolvedReferencePath = resolve(expandTilde(referenceImagePath.trim()));
   const planResult = await deps.generatePlan({
-    referenceImagePath: resolvedReferencePath,
+    referenceImages: [{ path: resolvedReferencePath, label: "" }],
     goalDescription: goalDescription.trim(),
     signal,
   });
@@ -182,7 +182,7 @@ export async function runSetupFlow(
     }
 
     const revisedResult = await deps.generatePlan({
-      referenceImagePath: resolvedReferencePath,
+      referenceImages: [{ path: resolvedReferencePath, label: "" }],
       goalDescription: goalDescription.trim(),
       revisionFeedback: feedback.trim(),
       previousPlan: currentPlan,

@@ -2,6 +2,7 @@ import { unlink } from "node:fs/promises";
 import type { Plan } from "@dcc/core";
 import type { DrizzleDb } from "../db/database";
 import { insertPlan } from "../db/plans";
+import { insertSessionImages } from "../db/session-images";
 import { insertSession, purgeOldSessions } from "../db/sessions";
 import type { CoachSessionHandle } from "./coach-session";
 import { createTaggedLogger } from "./logger";
@@ -13,7 +14,7 @@ type StartSessionDeps = {
 
 type StartSessionParams = {
   readonly goal: string;
-  readonly referenceImagePath: string;
+  readonly referenceImages: readonly { readonly path: string; readonly label: string }[];
   readonly displayId: string;
   readonly displayName: string;
   readonly plan: Plan | null;
@@ -30,15 +31,18 @@ export function schedulePurge(db: DrizzleDb, excludeSessionId: string): void {
   setImmediate(() => {
     const log = createTaggedLogger("session.purge");
     try {
-      // @throws — purge処理の失敗はバックグラウンドで握りつぶす
+      // purgeOldSessions は session_images も含めてDBから削除し、
+      // 削除可能な画像パスを戻り値に含めて返す
       const purged = purgeOldSessions(db, excludeSessionId);
       if (purged.length > 0) {
         log.info(`purged ${purged.length} old sessions`);
       }
       for (const old of purged) {
-        unlink(old.referenceImagePath).catch((err: NodeJS.ErrnoException) => {
-          if (err.code !== "ENOENT") log.failed(`unlink: ${String(err)}`);
-        });
+        for (const filePath of old.imageFilePaths) {
+          unlink(filePath).catch((err: NodeJS.ErrnoException) => {
+            if (err.code !== "ENOENT") log.failed(`unlink: ${String(err)}`);
+          });
+        }
       }
     } catch (e) {
       log.failed(`purge: ${String(e)}`);
@@ -55,10 +59,18 @@ export async function startSession(
   insertSession(deps.db, {
     id: sessionId,
     goal: params.goal,
-    referenceImagePath: params.referenceImagePath,
     displayId: params.displayId,
     displayName: params.displayName,
   });
+
+  if (params.referenceImages.length > 0) {
+    insertSessionImages(
+      deps.db,
+      sessionId,
+      params.referenceImages.map((img) => ({ filePath: img.path, label: img.label })),
+      "reference",
+    );
+  }
 
   let planId: string | null = null;
   if (params.plan !== null) {
@@ -76,7 +88,7 @@ export async function startSession(
     sessionId,
     planId,
     displayId: params.displayId,
-    referenceImagePath: params.referenceImagePath,
+    referenceImages: params.referenceImages,
     plan: params.plan,
   });
 

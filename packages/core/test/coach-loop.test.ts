@@ -64,7 +64,7 @@ function runLoop(abortController: AbortController, onEvent: (e: LoopEvent) => vo
     config: { ...defaultConfig, intervalSeconds: 0 },
     signal: abortController.signal,
     onEvent,
-    referenceImagePath: null,
+    referenceImages: [],
     plan: null,
     skillManifest: null,
     previousAdvices: [],
@@ -171,7 +171,7 @@ describe("startCoachLoop", () => {
       config: { ...defaultConfig, intervalSeconds: 0 },
       signal: abortController.signal,
       onEvent: (e) => events.push(e),
-      referenceImagePath: null,
+      referenceImages: [],
       plan: null,
       skillManifest: null,
       previousAdvices: [],
@@ -184,7 +184,7 @@ describe("startCoachLoop", () => {
     );
   });
 
-  test("referenceImagePathとplanがinvokeClaudeのpromptとappendSystemPromptに反映される", async () => {
+  test("referenceImagesとplanがinvokeClaudeのpromptとappendSystemPromptに反映される", async () => {
     invokeClaude.mockClear();
 
     const plan: Plan = {
@@ -210,7 +210,7 @@ describe("startCoachLoop", () => {
       config: { ...defaultConfig, intervalSeconds: 0 },
       signal: abortController.signal,
       onEvent,
-      referenceImagePath: "/tmp/ref.png",
+      referenceImages: [{ path: "/tmp/ref.png", label: "" }],
       plan,
       skillManifest: null,
       previousAdvices: [],
@@ -244,7 +244,7 @@ describe("startCoachLoop", () => {
       config: { ...defaultConfig, intervalSeconds: 0 },
       signal: abortController.signal,
       onEvent,
-      referenceImagePath: null,
+      referenceImages: [],
       plan: null,
       skillManifest: "- skills/techniques/masks.md\n- skills/tools/photoshop/shortcuts.md",
       previousAdvices: [],
@@ -280,7 +280,7 @@ describe("startCoachLoop", () => {
           abortController.abort();
         }
       },
-      referenceImagePath: null,
+      referenceImages: [],
       plan: null,
       skillManifest: null,
       previousAdvices: [],

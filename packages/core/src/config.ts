@@ -17,7 +17,7 @@ export type CoachConfig = {
 export const defaultConfig: CoachConfig = {
   intervalSeconds: 5,
   diffThresholdPercent: 5,
-  maxImageWidthPx: 1280,
+  maxImageWidthPx: 1920,
   pixelmatchThreshold: 0.1,
   notification: "terminal",
   claude: {

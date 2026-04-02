@@ -20,7 +20,6 @@ describe("sessions", () => {
     insertSession(db, {
       id: "s1",
       goal: "ロゴを作る",
-      referenceImagePath: "/tmp/ref.png",
       displayId: "0",
       displayName: "Main",
     });
@@ -37,7 +36,6 @@ describe("sessions", () => {
     insertSession(db, {
       id: "s2",
       goal: "テスト",
-      referenceImagePath: "/tmp/ref.png",
       displayId: "0",
       displayName: "Main",
     });
@@ -52,14 +50,12 @@ describe("sessions", () => {
     insertSession(db, {
       id: "s1",
       goal: "1つ目",
-      referenceImagePath: "/tmp/ref.png",
       displayId: "0",
       displayName: "Main",
     });
     insertSession(db, {
       id: "s2",
       goal: "2つ目",
-      referenceImagePath: "/tmp/ref.png",
       displayId: "0",
       displayName: "Main",
     });
@@ -74,11 +70,10 @@ describe("sessions", () => {
   });
 });
 
-function insertDummySession(db: ReturnType<typeof createTestDb>, id: string, imagePath: string) {
+function insertDummySession(db: ReturnType<typeof createTestDb>, id: string) {
   insertSession(db, {
     id,
     goal: `goal-${id}`,
-    referenceImagePath: imagePath,
     displayId: "0",
     displayName: "Main",
   });
@@ -88,7 +83,7 @@ describe("purgeOldSessions", () => {
   test("200件以下のとき何も削除されない", () => {
     const db = createTestDb();
     for (let i = 0; i < 5; i++) {
-      insertDummySession(db, `s${i}`, `/tmp/${i}.png`);
+      insertDummySession(db, `s${i}`);
     }
 
     const purged = purgeOldSessions(db, "current");
@@ -100,7 +95,7 @@ describe("purgeOldSessions", () => {
   test("201件以上のとき、ID降順で末尾のセッションが削除される", () => {
     const db = createTestDb();
     for (let i = 0; i < 203; i++) {
-      insertDummySession(db, `s${String(i).padStart(4, "0")}`, `/tmp/${i}.png`);
+      insertDummySession(db, `s${String(i).padStart(4, "0")}`);
     }
 
     const purged = purgeOldSessions(db, "s0202");
@@ -117,7 +112,7 @@ describe("purgeOldSessions", () => {
   test("excludeSessionIdは削除対象から除外されつつ他は削除される", () => {
     const db = createTestDb();
     for (let i = 0; i < 203; i++) {
-      insertDummySession(db, `s${String(i).padStart(4, "0")}`, `/tmp/${i}.png`);
+      insertDummySession(db, `s${String(i).padStart(4, "0")}`);
     }
 
     purgeOldSessions(db, "s0000");
@@ -132,7 +127,7 @@ describe("purgeOldSessions", () => {
     const db = createTestDb();
     for (let i = 0; i < 203; i++) {
       const id = `s${String(i).padStart(4, "0")}`;
-      insertDummySession(db, id, `/tmp/${i}.png`);
+      insertDummySession(db, id);
       insertPlan(db, {
         id: `p${i}`,
         sessionId: id,
@@ -162,16 +157,15 @@ describe("purgeOldSessions", () => {
     expect(findAdvicesBySessionId(db, keptId)).toHaveLength(1);
   });
 
-  test("他セッションが参照中の画像パスは返り値から除外されるがDB削除は行われる", () => {
+  test("purgeされたセッションのIDが返り値に含まれる", () => {
     const db = createTestDb();
-    const sharedPath = "/tmp/shared.png";
     for (let i = 0; i < 203; i++) {
-      insertDummySession(db, `s${String(i).padStart(4, "0")}`, sharedPath);
+      insertDummySession(db, `s${String(i).padStart(4, "0")}`);
     }
 
     const purged = purgeOldSessions(db, "s0202");
 
-    expect(purged).toHaveLength(0);
+    expect(purged).toHaveLength(3);
     expect(listSessions(db)).toHaveLength(200);
     expect(findSessionById(db, "s0000")).toBeNull();
   });
@@ -183,7 +177,6 @@ describe("plans", () => {
     insertSession(db, {
       id: "s1",
       goal: "テスト",
-      referenceImagePath: "/tmp/ref.png",
       displayId: "0",
       displayName: "Main",
     });
@@ -224,7 +217,6 @@ describe("advices", () => {
     insertSession(db, {
       id: "s1",
       goal: "テスト",
-      referenceImagePath: "/tmp/ref.png",
       displayId: "0",
       displayName: "Main",
     });
@@ -257,7 +249,6 @@ describe("advices", () => {
     insertSession(db, {
       id: "s1",
       goal: "テスト",
-      referenceImagePath: "/tmp/ref.png",
       displayId: "0",
       displayName: "Main",
     });
@@ -286,8 +277,8 @@ describe("advices", () => {
 
   test("copyAdvicesToSessionで旧セッションのアドバイスがisRestored=1でコピーされる", () => {
     const db = createTestDb();
-    insertDummySession(db, "old", "/tmp/old.png");
-    insertDummySession(db, "new", "/tmp/new.png");
+    insertDummySession(db, "old");
+    insertDummySession(db, "new");
     insertPlan(db, {
       id: "new-plan",
       sessionId: "new",
@@ -332,8 +323,8 @@ describe("advices", () => {
 
   test("copyAdvicesToSessionでアドバイスが0件の場合エラーにならない", () => {
     const db = createTestDb();
-    insertDummySession(db, "old", "/tmp/old.png");
-    insertDummySession(db, "new", "/tmp/new.png");
+    insertDummySession(db, "old");
+    insertDummySession(db, "new");
 
     copyAdvicesToSession(db, "old", "new", null);
 
@@ -342,7 +333,7 @@ describe("advices", () => {
 
   test("通常のinsertAdviceはisRestored=0になる", () => {
     const db = createTestDb();
-    insertDummySession(db, "s1", "/tmp/s1.png");
+    insertDummySession(db, "s1");
 
     insertAdvice(db, {
       id: "a1",

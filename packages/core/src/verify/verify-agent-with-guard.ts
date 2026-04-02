@@ -70,7 +70,7 @@ export async function verifyAgentWithGuard(): Promise<VerifyResult> {
       "https://www.youtube.com/watch?v=LoFCBi0IzqE",
     ].join("\n"),
     appendSystemPrompt: buildCoachSystemPrompt({
-      referenceImagePath: null,
+      referenceImages: [],
       plan: null,
       skillManifest: null,
       previousAdvices: [],

@@ -4,12 +4,26 @@ import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 export const sessions = sqliteTable("sessions", {
   id: text("id").primaryKey(),
   goal: text("goal").notNull(),
-  referenceImagePath: text("reference_image_path").notNull(),
   displayId: text("display_id").notNull(),
   displayName: text("display_name").notNull().default(""),
   startedAt: text("started_at").notNull().default(sql`(datetime('now'))`),
   endedAt: text("ended_at"),
 });
+
+export const sessionImages = sqliteTable(
+  "session_images",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id),
+    filePath: text("file_path").notNull(),
+    label: text("label").notNull().default(""),
+    sortOrder: integer("sort_order").notNull().default(0),
+    imageType: text("image_type").notNull().default("reference"),
+  },
+  (table) => [index("idx_session_images_session").on(table.sessionId)],
+);
 
 export const plans = sqliteTable(
   "plans",

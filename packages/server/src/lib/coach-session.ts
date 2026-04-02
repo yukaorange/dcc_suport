@@ -6,6 +6,7 @@ import {
   type Plan,
   type RestoredAdvice,
   startCoachLoop,
+  type UserMessage,
 } from "@dcc/core";
 import { insertAdvice } from "../db/advices";
 import type { DrizzleDb } from "../db/database";
@@ -24,7 +25,7 @@ type StartOptions = {
   readonly sessionId: string;
   readonly planId: string | null;
   readonly displayId?: string;
-  readonly referenceImagePath: string | null;
+  readonly referenceImages: readonly { readonly path: string; readonly label: string }[];
   readonly plan: Plan | null;
   readonly previousAdvices?: readonly RestoredAdvice[];
 };
@@ -35,9 +36,10 @@ type SubmitMessageResult =
 
 type CoachSessionHandle = {
   readonly getActiveSessionId: () => string | null;
+  readonly isSessionActive: (sessionId: string) => boolean;
   readonly start: (options: StartOptions) => Promise<void>;
   readonly stop: () => void;
-  readonly submitMessage: (sessionId: string, message: string) => SubmitMessageResult;
+  readonly submitMessage: (sessionId: string, message: UserMessage) => SubmitMessageResult;
 };
 
 export type { CoachSessionHandle, StartOptions };
@@ -114,7 +116,7 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
         signal: abortController.signal,
         onEvent,
         displayId: options.displayId,
-        referenceImagePath: options.referenceImagePath,
+        referenceImages: options.referenceImages,
         plan: options.plan,
         skillManifest,
         previousAdvices: options.previousAdvices ?? [],
@@ -146,10 +148,14 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
         });
     },
 
+    isSessionActive: (sessionId) => {
+      return activeState !== null && activeState.sessionId === sessionId;
+    },
+
     submitMessage: (sessionId, message) => {
       const isActive = activeState !== null && activeState.sessionId === sessionId;
       console.log(
-        `[coach-session] submitMessage session=${sessionId}, active=${isActive}, message="${message.slice(0, 50).replace(/[\r\n]/g, " ")}"`,
+        `[coach-session] submitMessage session=${sessionId}, active=${isActive}, message="${message.text.slice(0, 50).replace(/[\r\n]/g, " ")}"`,
       );
       if (!isActive) {
         return { isOk: false, reason: "アクティブなセッションが見つかりません" };

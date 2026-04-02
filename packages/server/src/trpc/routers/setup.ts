@@ -32,7 +32,7 @@ export const setupRouter = router({
         { db: ctx.db, coachSession: ctx.coachSession },
         {
           goal: cached.goalDescription,
-          referenceImagePath: cached.referenceImagePath,
+          referenceImages: cached.referenceImages,
           displayId: input.displayId,
           displayName: input.displayName,
           plan: cached.plan,

@@ -58,3 +58,35 @@ export async function saveBase64Image(base64: string, fileName: string): Promise
 
   return { isOk: true, filePath };
 }
+
+type ImageEntry = {
+  readonly base64: string;
+  readonly fileName: string;
+};
+
+type SaveImagesResult =
+  | { readonly isOk: true; readonly filePaths: readonly string[] }
+  | { readonly isOk: false; readonly message: string };
+
+export type { ImageEntry, SaveImagesResult };
+
+async function cleanupFiles(paths: readonly string[]): Promise<void> {
+  const { unlink } = await import("node:fs/promises");
+  for (const p of paths) {
+    await unlink(p).catch(() => {});
+  }
+}
+
+export async function saveBase64Images(images: readonly ImageEntry[]): Promise<SaveImagesResult> {
+  const filePaths: string[] = [];
+  for (const image of images) {
+    // @throws — ファイルシステムエラー
+    const result = await saveBase64Image(image.base64, image.fileName);
+    if (!result.isOk) {
+      await cleanupFiles(filePaths);
+      return { isOk: false, message: `${image.fileName}: ${result.message}` };
+    }
+    filePaths.push(result.filePath);
+  }
+  return { isOk: true, filePaths };
+}

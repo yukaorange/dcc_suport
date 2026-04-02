@@ -1,6 +1,12 @@
 export { buildAgentDefinitions } from "./agents";
 export { buildCapturedImage, captureScreen } from "./capture";
-export type { CoachAdvice, CoachLoopHandle, CoachLoopOptions, LoopEvent } from "./coach-loop";
+export type {
+  CoachAdvice,
+  CoachLoopHandle,
+  CoachLoopOptions,
+  LoopEvent,
+  UserMessage,
+} from "./coach-loop";
 export { startCoachLoop } from "./coach-loop";
 export type { CoachConfig, LoadConfigResult } from "./config";
 export { defaultConfig, loadConfig } from "./config";
@@ -19,6 +25,7 @@ export type {
   Plan,
   PlanStep,
   PlanStepStatus,
+  ReferenceImageInput,
 } from "./planner";
 export { generatePlan, updateStepStatus } from "./planner";
 export type { CoachPromptInput, CoachSystemPromptInput, RestoredAdvice } from "./prompts";

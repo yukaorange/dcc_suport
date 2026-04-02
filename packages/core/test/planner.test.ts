@@ -60,7 +60,7 @@ describe("generatePlan", () => {
     });
 
     const result = await generatePlan({
-      referenceImagePath: "/tmp/ref.png",
+      referenceImages: [{ path: "/tmp/ref.png", label: "" }],
       goalDescription: "ロゴを作りたい",
     });
 

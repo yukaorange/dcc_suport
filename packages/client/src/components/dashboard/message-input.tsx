@@ -13,11 +13,12 @@ type AttachedImage = {
 
 type MessageInputProps = {
   readonly sessionId: string;
+  readonly isPaused: boolean;
 };
 
 const MAX_ATTACHMENTS = 3;
 
-export function MessageInput({ sessionId }: MessageInputProps) {
+export function MessageInput({ sessionId, isPaused }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [attachedImages, setAttachedImages] = useState<readonly AttachedImage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -129,7 +130,11 @@ export function MessageInput({ sessionId }: MessageInputProps) {
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="コーチにメッセージを送る（⌘+Enter で送信）"
+          placeholder={
+            isPaused
+              ? "メッセージを送信するとコーチングが再開します（⌘+Enter で送信）"
+              : "コーチにメッセージを送る（⌘+Enter で送信）"
+          }
           className="min-h-[40px] resize-none rounded-xl"
           rows={1}
           disabled={mutation.isPending}

@@ -76,6 +76,8 @@ type LoopEvent =
       readonly stepIndex: number;
       readonly newStatus: PlanStepStatus;
     }
+  | { readonly kind: "paused" }
+  | { readonly kind: "resumed" }
   | { readonly kind: "stopped" };
 
 export type { LoopEvent, CoachAdvice };
@@ -83,7 +85,9 @@ export type { LoopEvent, CoachAdvice };
 type MessageBox = {
   readonly submit: (message: UserMessage) => void;
   readonly consume: () => UserMessage | null;
+  readonly hasMessages: () => boolean;
   readonly awaitMessage: () => Promise<void>;
+  readonly cancelAwait: () => void;
 };
 
 function createMessageBox(): MessageBox {
@@ -94,14 +98,59 @@ function createMessageBox(): MessageBox {
     submit: (message: UserMessage) => {
       queue.push(message);
       wakeResolve?.();
+      wakeResolve = null;
     },
     consume: () => {
       return queue.shift() ?? null;
     },
+    hasMessages: () => queue.length > 0,
     awaitMessage: () =>
       new Promise<void>((resolve) => {
         wakeResolve = resolve;
       }),
+    cancelAwait: () => {
+      wakeResolve = null;
+    },
+  };
+}
+
+type PauseControl = {
+  readonly pause: () => void;
+  readonly resume: () => void;
+  readonly isPaused: () => boolean;
+  readonly onPause: (cb: () => void) => void;
+  readonly onResume: (cb: () => void) => void;
+  readonly offPause: () => void;
+  readonly offResume: () => void;
+};
+
+function createPauseControl(): PauseControl {
+  let paused = false;
+  let pauseCb: (() => void) | null = null;
+  let resumeCb: (() => void) | null = null;
+
+  return {
+    pause: () => {
+      paused = true;
+      pauseCb?.();
+    },
+    resume: () => {
+      paused = false;
+      resumeCb?.();
+    },
+    isPaused: () => paused,
+    onPause: (cb) => {
+      pauseCb = cb;
+    },
+    onResume: (cb) => {
+      resumeCb = cb;
+    },
+    offPause: () => {
+      pauseCb = null;
+    },
+    offResume: () => {
+      resumeCb = null;
+    },
   };
 }
 
@@ -119,6 +168,9 @@ type CoachLoopOptions = {
 type CoachLoopHandle = {
   readonly loopFinished: Promise<void>;
   readonly submitMessage: (message: UserMessage) => void;
+  readonly pause: () => void;
+  readonly resume: () => void;
+  readonly isPaused: () => boolean;
 };
 
 export type { CoachLoopOptions, CoachLoopHandle };
@@ -211,41 +263,43 @@ async function cleanupTemp(): Promise<void> {
   await unlink(SCREENSHOT_PATH).catch(() => {});
 }
 
-// 次のラウンドまで待機する。以下の3つのうち最初に起きたもので起きる:
-//   ① タイマー満了（durationMs 経過）
-//   ② abort シグナル（Ctrl+C）
-//   ③ ユーザーがメッセージを入力
-//
-// JS に「レースして負けた方を片付ける」仕組みがないため、
-// settled フラグで二重実行を防ぎ、cleanup で敗者側のタイマー/リスナーを手動で外している。
-function sleepOrUserInput(
+type WakeReason = "timer" | "abort" | "message" | "pause" | "resume";
+
+// 次のラウンドまで待機する。5つのトリガーのうち最初に起きたもので返る:
+//   ① タイマー満了 ② abort ③ メッセージ ④ pause ⑤ resume
+function waitForNextRound(
   durationMs: number,
   signal: AbortSignal,
   messageBox: MessageBox,
-): Promise<void> {
-  return new Promise((resolve) => {
-    let settled = false; //レース決着がついたか否か
+  pauseControl: PauseControl,
+): Promise<WakeReason> {
+  if (messageBox.hasMessages()) return Promise.resolve("message");
+  if (signal.aborted) return Promise.resolve("abort");
+  if (pauseControl.isPaused()) return Promise.resolve("pause");
 
-    // どのトリガーで起きても、最終的にこの関数が1回だけ呼ばれる
-    const wakeUp = () => {
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const wakeUp = (reason: WakeReason) => {
       if (settled) return;
       settled = true;
       cleanup();
-      resolve();
+      resolve(reason);
     };
 
-    // ① ② ③ を同時に仕掛ける
-    const timer = setTimeout(wakeUp, durationMs); // ①
-
-    const onAbort = () => wakeUp(); // ②
+    const timer = setTimeout(() => wakeUp("timer"), durationMs);
+    const onAbort = () => wakeUp("abort");
     signal.addEventListener("abort", onAbort, { once: true });
+    messageBox.awaitMessage().then(() => wakeUp("message"));
+    pauseControl.onPause(() => wakeUp("pause"));
+    pauseControl.onResume(() => wakeUp("resume"));
 
-    messageBox.awaitMessage().then(wakeUp); // ③
-
-    // 勝者が決まったら、タイマーと abort リスナーを片付ける
     const cleanup = () => {
       clearTimeout(timer);
       signal.removeEventListener("abort", onAbort);
+      messageBox.cancelAwait();
+      pauseControl.offPause();
+      pauseControl.offResume();
     };
   });
 }
@@ -368,6 +422,37 @@ async function executeOneRound(
 
 export function startCoachLoop(options: CoachLoopOptions): CoachLoopHandle {
   const messageBox = createMessageBox();
+  const pauseControl = createPauseControl();
+
+  // pause 中は resume / abort / message のいずれかで抜ける専用待機
+  async function awaitUnpause(): Promise<void> {
+    if (!pauseControl.isPaused()) return;
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const wake = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+
+      const onAbort = () => wake();
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      pauseControl.onResume(() => wake());
+      messageBox.awaitMessage().then(() => {
+        pauseControl.resume();
+        options.onEvent({ kind: "resumed" });
+        wake();
+      });
+
+      const cleanup = () => {
+        options.signal.removeEventListener("abort", onAbort);
+        messageBox.cancelAwait();
+        pauseControl.offResume();
+      };
+    });
+  }
 
   const loopFinished = (async () => {
     await ensureTempDir();
@@ -381,16 +466,43 @@ export function startCoachLoop(options: CoachLoopOptions): CoachLoopHandle {
 
     try {
       while (!options.signal.aborted) {
+        await awaitUnpause();
+        if (options.signal.aborted) break;
+
         const userMessage = messageBox.consume();
         state = await executeOneRound(state, options, userMessage);
 
         if (options.signal.aborted) break;
-        await sleepOrUserInput(options.config.intervalSeconds * 1000, options.signal, messageBox);
+        const reason = await waitForNextRound(
+          options.config.intervalSeconds * 1000,
+          options.signal,
+          messageBox,
+          pauseControl,
+        );
+        if (reason === "pause") {
+          console.log("[loop] paused by user");
+        }
       }
     } finally {
       await cleanupTemp();
     }
   })();
 
-  return { loopFinished, submitMessage: messageBox.submit };
+  return {
+    loopFinished,
+    submitMessage: messageBox.submit,
+    pause: () => {
+      if (!pauseControl.isPaused()) {
+        pauseControl.pause();
+        options.onEvent({ kind: "paused" });
+      }
+    },
+    resume: () => {
+      if (pauseControl.isPaused()) {
+        pauseControl.resume();
+        options.onEvent({ kind: "resumed" });
+      }
+    },
+    isPaused: pauseControl.isPaused,
+  };
 }

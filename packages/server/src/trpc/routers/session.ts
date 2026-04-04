@@ -77,6 +77,7 @@ export const sessionRouter = router({
         timestampMs: a.timestampMs,
         isRestored: a.isRestored === 1,
       })),
+      isPaused: ctx.coachSession.isSessionPaused(input.id),
     };
   }),
 
@@ -140,6 +141,38 @@ export const sessionRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });
       }
 
+      return { success: true };
+    }),
+
+  pause: publicProcedure
+    .input(z.object({ sessionId: z.string().uuid() }))
+    .mutation(({ input, ctx }) => {
+      if (!ctx.coachSession.isSessionActive(input.sessionId)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "アクティブなセッションが見つかりません",
+        });
+      }
+      const result = ctx.coachSession.pause(input.sessionId);
+      if (!result.isOk) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });
+      }
+      return { success: true };
+    }),
+
+  resume: publicProcedure
+    .input(z.object({ sessionId: z.string().uuid() }))
+    .mutation(({ input, ctx }) => {
+      if (!ctx.coachSession.isSessionActive(input.sessionId)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "アクティブなセッションが見つかりません",
+        });
+      }
+      const result = ctx.coachSession.resume(input.sessionId);
+      if (!result.isOk) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });
+      }
       return { success: true };
     }),
 

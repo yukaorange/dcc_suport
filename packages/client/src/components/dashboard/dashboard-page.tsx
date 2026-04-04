@@ -22,6 +22,7 @@ function CoachingFeed({
   sessionId,
   initialAdvices,
   initialStopped,
+  initialPaused,
   onBackToSetup,
   onPlanStepUpdated,
   children,
@@ -34,27 +35,62 @@ function CoachingFeed({
     isRestored: boolean;
   }[];
   readonly initialStopped: boolean;
+  readonly initialPaused: boolean;
   readonly onBackToSetup: () => void;
   readonly onPlanStepUpdated: (stepIndex: number, newStatus: PlanStepStatus) => void;
   readonly children: ReactNode;
 }) {
-  const { adviceHistory, latestAdvice, isCoachingStopped } = useLoopEvents(
+  const { adviceHistory, latestAdvice, isCoachingStopped, isCoachingPaused } = useLoopEvents(
     sessionId,
     !initialStopped,
-    { advices: initialAdvices, isStopped: initialStopped },
+    { advices: initialAdvices, isStopped: initialStopped, isPaused: initialPaused },
     onPlanStepUpdated,
   );
+
+  const feedUtils = trpc.useUtils();
+  const pauseMutation = trpc.session.pause.useMutation({
+    onSuccess: () => {
+      feedUtils.session.get.setData({ id: sessionId }, (prev) =>
+        prev ? { ...prev, isPaused: true } : prev,
+      );
+    },
+  });
+  const resumeMutation = trpc.session.resume.useMutation({
+    onSuccess: () => {
+      feedUtils.session.get.setData({ id: sessionId }, (prev) =>
+        prev ? { ...prev, isPaused: false } : prev,
+      );
+    },
+  });
+
+  const handleTogglePause = () => {
+    if (isCoachingPaused) {
+      resumeMutation.mutate({ sessionId });
+    } else {
+      pauseMutation.mutate({ sessionId });
+    }
+  };
+
+  const badgeVariant = isCoachingStopped ? "secondary" : isCoachingPaused ? "outline" : "default";
+  const badgeLabel = isCoachingStopped ? "終了" : isCoachingPaused ? "一時停止中" : "コーチング中";
 
   return (
     <div className="flex flex-col gap-6 pb-24">
       <div className="flex items-center gap-3">
         <h2 className="text-2xl font-bold tracking-tight">Dashboard</h2>
-        <Badge
-          variant={isCoachingStopped ? "secondary" : "default"}
-          className="rounded-full px-3 py-1"
-        >
-          {isCoachingStopped ? "終了" : "コーチング中"}
+        <Badge variant={badgeVariant} className="rounded-full px-3 py-1">
+          {badgeLabel}
         </Badge>
+        {!isCoachingStopped && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleTogglePause}
+            disabled={pauseMutation.isPending || resumeMutation.isPending}
+          >
+            {isCoachingPaused ? "▶ 再開" : "⏸ 一時停止"}
+          </Button>
+        )}
         {isCoachingStopped && (
           <Button variant="outline" size="sm" className="ml-auto" onClick={onBackToSetup}>
             新規セットアップ
@@ -66,7 +102,7 @@ function CoachingFeed({
         <LatestAdvice content={latestAdvice.content} roundIndex={latestAdvice.roundIndex} />
       )}
 
-      {!isCoachingStopped && <MessageInput sessionId={sessionId} />}
+      {!isCoachingStopped && <MessageInput sessionId={sessionId} isPaused={isCoachingPaused} />}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">{children}</div>
@@ -85,6 +121,7 @@ export function DashboardPage({ sessionId, onBackToSetup }: DashboardPageProps) 
   const isDataLoaded = data !== undefined;
   const initialAdvices = data?.advices ?? [];
   const initialStopped = data?.session.endedAt !== null && data?.session.endedAt !== undefined;
+  const initialPaused = data?.isPaused ?? false;
 
   const updateStepMutation = trpc.session.updateStepStatus.useMutation();
 
@@ -117,6 +154,7 @@ export function DashboardPage({ sessionId, onBackToSetup }: DashboardPageProps) 
       sessionId={sessionId}
       initialAdvices={initialAdvices}
       initialStopped={initialStopped}
+      initialPaused={initialPaused}
       onBackToSetup={onBackToSetup}
       onPlanStepUpdated={handlePlanStepUpdated}
     >

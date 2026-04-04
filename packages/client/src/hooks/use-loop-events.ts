@@ -12,12 +12,14 @@ type Advice = {
 type InitialState = {
   readonly advices: readonly Advice[];
   readonly isStopped: boolean;
+  readonly isPaused: boolean;
 };
 
 type LoopEventsResult = {
   readonly adviceHistory: readonly Advice[];
   readonly latestAdvice: Advice | null;
   readonly isCoachingStopped: boolean;
+  readonly isCoachingPaused: boolean;
 };
 
 export function useLoopEvents(
@@ -28,19 +30,17 @@ export function useLoopEvents(
 ): LoopEventsResult {
   const [adviceHistory, setAdviceHistory] = useState<readonly Advice[]>(initialState.advices);
   const [isCoachingStopped, setIsCoachingStopped] = useState(initialState.isStopped);
+  const [isCoachingPaused, setIsCoachingPaused] = useState(initialState.isPaused);
 
-  // sessionId 切替時のみ状態をリセット
-  // DashboardPage が data ロード完了後にのみマウントするため、
-  // useState の初期値で DB データは反映済み。以降は SSE が state を管理する。
   const prevSessionIdRef = useRef(sessionId);
 
   if (prevSessionIdRef.current !== sessionId) {
     prevSessionIdRef.current = sessionId;
     setAdviceHistory(initialState.advices);
     setIsCoachingStopped(initialState.isStopped);
+    setIsCoachingPaused(initialState.isPaused);
   }
 
-  // onPlanStepUpdated の最新参照を保持（SSE コールバック内で使うため）
   const onPlanStepUpdatedRef = useRef(onPlanStepUpdated);
   useEffect(() => {
     onPlanStepUpdatedRef.current = onPlanStepUpdated;
@@ -58,6 +58,12 @@ export function useLoopEvents(
           case "plan_step_updated":
             onPlanStepUpdatedRef.current?.(event.stepIndex, event.newStatus);
             break;
+          case "paused":
+            setIsCoachingPaused(true);
+            break;
+          case "resumed":
+            setIsCoachingPaused(false);
+            break;
           case "stopped":
             setIsCoachingStopped(true);
             break;
@@ -68,5 +74,5 @@ export function useLoopEvents(
 
   const latestAdvice = adviceHistory.findLast((a) => !a.isRestored) ?? null;
 
-  return { adviceHistory, latestAdvice, isCoachingStopped };
+  return { adviceHistory, latestAdvice, isCoachingStopped, isCoachingPaused };
 }

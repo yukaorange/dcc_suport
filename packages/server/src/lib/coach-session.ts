@@ -34,12 +34,17 @@ type SubmitMessageResult =
   | { readonly isOk: true }
   | { readonly isOk: false; readonly reason: string };
 
+type PauseResult = { readonly isOk: true } | { readonly isOk: false; readonly reason: string };
+
 type CoachSessionHandle = {
   readonly getActiveSessionId: () => string | null;
   readonly isSessionActive: (sessionId: string) => boolean;
+  readonly isSessionPaused: (sessionId: string) => boolean;
   readonly start: (options: StartOptions) => Promise<void>;
   readonly stop: () => void;
   readonly submitMessage: (sessionId: string, message: UserMessage) => SubmitMessageResult;
+  readonly pause: (sessionId: string) => PauseResult;
+  readonly resume: (sessionId: string) => PauseResult;
 };
 
 export type { CoachSessionHandle, StartOptions };
@@ -162,6 +167,27 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
       }
       activeState?.loop.submitMessage(message);
       return { isOk: true };
+    },
+
+    pause: (sessionId) => {
+      if (activeState === null || activeState.sessionId !== sessionId) {
+        return { isOk: false, reason: "アクティブなセッションが見つかりません" };
+      }
+      activeState.loop.pause();
+      return { isOk: true };
+    },
+
+    resume: (sessionId) => {
+      if (activeState === null || activeState.sessionId !== sessionId) {
+        return { isOk: false, reason: "アクティブなセッションが見つかりません" };
+      }
+      activeState.loop.resume();
+      return { isOk: true };
+    },
+
+    isSessionPaused: (sessionId) => {
+      if (activeState === null || activeState.sessionId !== sessionId) return false;
+      return activeState.loop.isPaused();
     },
 
     stop: () => {

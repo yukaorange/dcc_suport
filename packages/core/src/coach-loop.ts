@@ -424,21 +424,34 @@ export function startCoachLoop(options: CoachLoopOptions): CoachLoopHandle {
   const messageBox = createMessageBox();
   const pauseControl = createPauseControl();
 
+  // pause 中は resume / abort / message のいずれかで抜ける専用待機
   async function awaitUnpause(): Promise<void> {
-    while (pauseControl.isPaused() && !options.signal.aborted) {
-      const reason = await waitForNextRound(60_000, options.signal, messageBox, pauseControl);
-      switch (reason) {
-        case "resume":
-        case "abort":
-          return;
-        case "message":
-          pauseControl.resume();
-          options.onEvent({ kind: "resumed" });
-          return;
-        default:
-          break;
-      }
-    }
+    if (!pauseControl.isPaused()) return;
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const wake = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+
+      const onAbort = () => wake();
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      pauseControl.onResume(() => wake());
+      messageBox.awaitMessage().then(() => {
+        pauseControl.resume();
+        options.onEvent({ kind: "resumed" });
+        wake();
+      });
+
+      const cleanup = () => {
+        options.signal.removeEventListener("abort", onAbort);
+        messageBox.cancelAwait();
+        pauseControl.offResume();
+      };
+    });
   }
 
   const loopFinished = (async () => {
@@ -466,7 +479,10 @@ export function startCoachLoop(options: CoachLoopOptions): CoachLoopHandle {
           messageBox,
           pauseControl,
         );
-        if (reason === "pause") continue;
+        if (reason === "pause") {
+          console.log("[loop] paused by user");
+          continue;
+        }
       }
     } finally {
       await cleanupTemp();

@@ -481,7 +481,6 @@ export function startCoachLoop(options: CoachLoopOptions): CoachLoopHandle {
         );
         if (reason === "pause") {
           console.log("[loop] paused by user");
-          continue;
         }
       }
     } finally {

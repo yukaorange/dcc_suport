@@ -25,6 +25,7 @@
             "Read(**/.env)",
             "Read(**/.env.*)",
             "Bash(rm:*)",
+            "Bash(rmdir:*)",
             "Bash(sudo:*)"
         ]
     },

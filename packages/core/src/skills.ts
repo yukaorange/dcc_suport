@@ -1,5 +1,5 @@
 import { readdir } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { YOUTUBE_URL_PATTERN } from "./gemini";
 import { EXTRACT_VIDEO_SCRIPT, SKILLS_ROOT } from "./paths";
@@ -45,8 +45,31 @@ async function listMarkdownFiles(dirPath: string): Promise<string[]> {
     .sort();
 }
 
+// LLM とのパス契約を SKILLS_ROOT 基準に統一する。manifest 上は常に skills/... 表記。
+// skills/ 始まりの仮想パスは SKILLS_ROOT 基準で解決。
+// 絶対パスでも /skills/ を含み SKILLS_ROOT 配下でない場合は、cwd 取り違えとみなして
+// SKILLS_ROOT 配下に再マップする（LLM が誤って packages/server/skills/... 等を組み立てるケース対策）。
+export function resolveSkillPath(filePath: string): string {
+  if (isAbsolute(filePath)) {
+    const resolved = resolve(filePath);
+    const skillsRoot = resolve(SKILLS_ROOT);
+    if (resolved === skillsRoot || resolved.startsWith(skillsRoot + sep)) return resolved;
+    const marker = `${sep}skills${sep}`;
+    const idx = resolved.lastIndexOf(marker);
+    if (idx !== -1) {
+      return resolve(skillsRoot, resolved.slice(idx + marker.length));
+    }
+    return resolved;
+  }
+  const normalized = filePath.replace(/^\.\//, "");
+  if (normalized === "skills" || normalized.startsWith("skills/")) {
+    return resolve(SKILLS_ROOT, normalized.slice("skills/".length));
+  }
+  return resolve(filePath);
+}
+
 function formatManifest(filePaths: readonly string[]): string {
-  return filePaths.map((filePath) => `- ${relative(process.cwd(), filePath)}`).join("\n");
+  return filePaths.map((filePath) => `- skills/${relative(SKILLS_ROOT, filePath)}`).join("\n");
 }
 
 export async function buildSkillManifest(input: SkillManifestInput): Promise<SkillManifestResult> {
@@ -163,11 +186,6 @@ export function validateBashCommand(command: string): ValidationResult {
   return { isValid: true };
 }
 
-function isUnderAllowedReadPath(filePath: string): boolean {
-  const resolved = resolve(filePath);
-  return ALLOWED_READ_ROOTS.some((root) => resolved === root || resolved.startsWith(root + sep));
-}
-
 type PermissionResult =
   | { readonly behavior: "allow" }
   | { readonly behavior: "deny"; readonly message: string };
@@ -179,7 +197,12 @@ function checkReadPermission(toolName: string, input: Record<string, unknown>): 
   if (typeof filePath !== "string") {
     return { behavior: "deny", message: `${toolName}: path is required` };
   }
-  if (!isUnderAllowedReadPath(filePath)) {
+  // skills/... の仮想パスは SKILLS_ROOT 基準で解決する
+  const resolved =
+    !isAbsolute(filePath) && (filePath.startsWith("skills/") || filePath === "skills")
+      ? resolveSkillPath(filePath)
+      : resolve(filePath);
+  if (!ALLOWED_READ_ROOTS.some((root) => resolved === root || resolved.startsWith(root + sep))) {
     return {
       behavior: "deny",
       message: `${toolName} denied: path must be under skills/ or docs/. Got: ${filePath}`,
@@ -197,7 +220,7 @@ function checkWritePermission(
   if (typeof filePath !== "string") {
     return { behavior: "deny", message: "Write: file_path is required" };
   }
-  const resolved = resolve(filePath);
+  const resolved = resolveSkillPath(filePath);
   if (resolved !== writeRoot && !resolved.startsWith(writePrefix)) {
     return {
       behavior: "deny",

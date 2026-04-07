@@ -1,8 +1,12 @@
+import { Play } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ACCEPTED_IMAGE_TYPES, readFileAsBase64 } from "@/lib/image-file";
 import { trpc } from "../../trpc";
+
+// 「できました」「完了」等のステップ進捗を示唆する語は避ける（ステップ進捗を動かさないため）
+const NEXT_INSTRUCTION_MESSAGE = "やりました、次の指示をもらえますか？";
 
 type AttachedImage = {
   readonly id: string;
@@ -47,6 +51,15 @@ export function MessageInput({ sessionId, isPaused }: MessageInputProps) {
       },
     );
   };
+
+  // ステップ内のミクロ操作を1つこなしたあと、次の指示をコーチに即催促する
+  const handleRequestNextInstruction = () => {
+    if (mutation.isPending) return;
+    mutation.mutate({ sessionId, message: NEXT_INSTRUCTION_MESSAGE });
+  };
+
+  // 下書き/添付があるときは無効化（クイックボタンはあくまで「素手で次を催促」用途）
+  const canRequestNext = !canSend && !mutation.isPending;
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -139,6 +152,18 @@ export function MessageInput({ sessionId, isPaused }: MessageInputProps) {
           rows={1}
           disabled={mutation.isPending}
         />
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          aria-label="次の指示をもらう"
+          title="次の指示をもらう（下書き・添付があるときは無効）"
+          onClick={handleRequestNextInstruction}
+          disabled={!canRequestNext}
+          className="shrink-0 rounded-xl"
+        >
+          <Play className="h-4 w-4" />
+        </Button>
         <Button
           onClick={handleSubmit}
           disabled={!canSend || mutation.isPending}

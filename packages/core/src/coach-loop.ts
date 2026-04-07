@@ -8,7 +8,7 @@ import { checkSessionContinuity, type EngineResult, invokeClaude } from "./engin
 import { COACH_TEMP_DIR, SKILLS_ROOT } from "./paths";
 import type { Plan, PlanStepStatus } from "./planner";
 import { buildCoachSystemPrompt, buildCoachUserPrompt, type RestoredAdvice } from "./prompts";
-import { createToolPermissionGuard, validateBashCommand } from "./skills";
+import { createToolPermissionGuard, resolveSkillPath, validateBashCommand } from "./skills";
 
 const ADVISOR_MAX_TURNS = 20;
 const ADVISOR_TIMEOUT_MS = 600_000;
@@ -36,7 +36,7 @@ function handleToolUse(toolName: string, input: Record<string, unknown>): void {
     case "Write": {
       const filePath = input.file_path;
       if (typeof filePath === "string") {
-        const resolved = resolve(filePath);
+        const resolved = resolveSkillPath(filePath);
         const skillsRoot = resolve(SKILLS_ROOT);
         if (resolved !== skillsRoot && !resolved.startsWith(skillsRoot + sep)) {
           throw new Error(`[coach] skills/ 外への書き込みを検出。セッションを中断: ${filePath}`);

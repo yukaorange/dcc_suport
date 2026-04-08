@@ -1,59 +1,50 @@
 # アーキテクチャ概要
 
-更新日: 2026-03-19
+更新日: 2026-04-09
 
-## 全体フロー（現行 + DCC-7）
+## 全体フロー（Web UI 主導 / DCC-37 以降）
 
-起動からコーチングまでの全体の流れ。灰色のノードは DCC-7 で追加される部分。
+起動からコーチングまでの全体の流れ。Web UI（React SPA）が主動線で、CLI（`packages/cli`）は後方互換用に残されている。コーチングループはデフォルトで **manual モード** で起動し、ユーザーが「次へ進む」ボタンを押した時のみ 1 ラウンド実行される。「自動ループ ON/OFF」トグルで auto モードに切り替えると従来通り interval 毎に自動実行する。
 
 ```mermaid
 flowchart TD
-    Start([bun run start]) --> LoadConfig["config.ts<br>loadConfig()"]
-    LoadConfig --> Setup["setup-flow.ts<br>runSetupFlow()"]
+    Start([bun run start:web]) --> Boot["@dcc/server<br>index.ts: Bun.serve()"]
+    Boot --> SPA["@dcc/client<br>React SPA"]
 
-    Setup --> SelectDisplay["ディスプレイ選択<br>listDisplays() → inquirer"]
-    SelectDisplay --> InputRef["リファレンス画像入力<br>inquirer"]
-    InputRef --> InputGoal["目標記述入力<br>inquirer"]
-    InputGoal --> GenPlan["planner.ts<br>generatePlan()"]
-    GenPlan --> ConfirmPlan{"プラン承認？"}
-    ConfirmPlan -->|修正| GenPlan
-    ConfirmPlan -->|承認| LoadManifest
+    SPA --> SetupUI["セットアップ画面<br>(SetupPage)"]
+    SetupUI --> SelectDisplay["ディスプレイ選択<br>display.list query"]
+    SelectDisplay --> InputRef["参考画像 D&D<br>(reference-uploader)"]
+    InputRef --> InputGoal["ゴール入力<br>(goal-input)"]
+    InputGoal --> GenPlan["plan.generate mutation<br>→ @dcc/core generatePlan()"]
+    GenPlan --> ReviewPlan{"プラン確認"}
+    ReviewPlan -->|"再生成"| GenPlan
+    ReviewPlan -->|"承認"| StartSession["setup.start mutation<br>→ start-session.ts"]
 
-    LoadManifest["skills.ts<br>loadSkillManifest()"]:::dcc7
-    LoadManifest --> StartLoop["coach-loop.ts<br>startCoachLoop()"]
+    StartSession --> StartLoop["coach-session.ts<br>startCoachLoop()<br>initialMode: 'manual'"]
+    StartLoop --> Dashboard["DashboardPage<br>(SSE 購読開始)"]
 
-    subgraph loop ["コーチングループ（5秒間隔）"]
-        Capture["capture.ts<br>captureScreen()"]
-        Diff["diff.ts<br>computeDiff()"]
-        BuildPrompt["prompts.ts<br>buildCoachSystemPrompt()<br>buildCoachUserPrompt()"]
-        Engine["engine.ts<br>invokeClaude()"]
-        Parse["parseAdvice()"]
-
-        Capture --> CheckFirst{初回？}
-        CheckFirst -->|Yes| BuildPrompt
-        CheckFirst -->|No| CheckMsg{ユーザー<br>メッセージ？}
-        CheckMsg -->|Yes| BuildPrompt
-        CheckMsg -->|No| Diff
-        Diff -->|変化あり| BuildPrompt
-        Diff -->|変化なし| Sleep
-        BuildPrompt --> Engine
-        Engine --> Parse
-        Parse --> Sleep[5秒スリープ<br>or ユーザー入力]
-        Sleep --> Capture
+    subgraph loop ["コーチングループ (manual / auto)"]
+        WaitTrigger["waitForNextTrigger()<br>次の RoundTrigger を決定"]
+        Execute["executeOneRound(trigger)"]
+        WaitTrigger -->|"trigger != null"| Execute
+        Execute --> WaitTrigger
+        WaitTrigger -.->|"abort"| LoopEnd([ループ終了])
     end
 
-    StartLoop --> Capture
+    StartLoop --> WaitTrigger
 
-    subgraph subagents ["サブエージェント（DCC-7）"]:::dcc7box
-        Coach["advisor<br>方向性判断・GUI案内"]:::dcc7
-        Researcher["researcher<br>多段探索・知識蓄積"]:::dcc7
-    end
+    Dashboard -->|"次へ進む<br>session.requestNextRound"| WaitTrigger
+    Dashboard -->|"自動ON/OFF<br>session.setMode"| WaitTrigger
+    Dashboard -->|"sendMessage<br>session.sendMessage"| WaitTrigger
 
-    Engine -.->|"isSubagentsEnabled<br>= true"| subagents
+    Execute -.->|"querying / advice / no_change"| EventBus["EventBus<br>publish"]
+    EventBus -.->|"SSE"| Dashboard
 
-    classDef dcc7 fill:#e8eaf6,stroke:#5c6bc0
-    classDef dcc7box fill:#f5f5ff,stroke:#9fa8da
+    style StartLoop fill:#e8eaf6,stroke:#5c6bc0
+    style loop fill:#f5f5ff,stroke:#9fa8da
 ```
+
+> CLI 版（`bun run start`）も存在する。`packages/cli/src/index.ts` から `startCoachLoop({ initialMode: "auto" })` を直接呼ぶシンプルな構成で、setMode / requestNextRound の UI を持たないため manual モードはサポートしない。後方互換のために残されている。
 
 ## モジュール構成と関数マップ
 
@@ -73,10 +64,11 @@ flowchart LR
     end
 
     subgraph core ["コアループ"]
-        coachLoop["coach-loop.ts<br>─────────────<br>startCoachLoop()<br>executeOneRound()"]
+        coachLoop["coach-loop.ts<br>─────────────<br>startCoachLoop()<br>executeOneRound()<br>NextRoundGate / ModeController"]
+        loopTypes["loop-types.ts<br>─────────────<br>LoopMode<br>RoundTrigger<br>UserMessage"]
         capture["capture.ts<br>─────────────<br>captureScreen()"]
         diff["diff.ts<br>─────────────<br>computeDiff()"]
-        prompts["prompts.ts<br>─────────────<br>buildCoachSystemPrompt()<br>buildCoachUserPrompt()"]
+        prompts["prompts.ts<br>─────────────<br>buildCoachSystemPrompt()<br>buildCoachUserPrompt()<br>(trigger 軸の switch)"]
         engine["engine.ts<br>─────────────<br>invokeClaude()<br>checkSessionContinuity()"]
         output["output.ts<br>─────────────<br>printLoopEvent()<br>printSetupEvent()"]
     end
@@ -98,6 +90,8 @@ flowchart LR
     setupFlow --> planner
     planner --> engine
 
+    coachLoop --> loopTypes
+    prompts --> loopTypes
     coachLoop --> capture
     coachLoop --> diff
     coachLoop --> prompts
@@ -155,29 +149,29 @@ flowchart LR
 
 ## データフロー: セットアップからコーチングまで
 
+Web UI 経路（`bun run start:web`）の場合は `plan.generate` → `setup.start` の 2 段 mutation で組み立てる。CLI 経路（`bun run start`）は `runSetupFlow()` で同じく `Plan` を組み立てる。どちらも最終的に `startCoachLoop()` に同じ `CoachConfig` / `Plan` / `SkillManifest` を渡す。
+
 ```mermaid
 flowchart LR
     Config["config.json"] -->|"loadConfig()"| CoachConfig["CoachConfig"]
-    Ref["リファレンス画像パス"] -->|"runSetupFlow()"| Plan["Plan"]
-    Goal["目標テキスト"] -->|"runSetupFlow()"| Plan
+    Ref["リファレンス画像"] -->|"plan.generate / runSetupFlow"| Plan["Plan"]
+    Goal["目標テキスト"] -->|"plan.generate / runSetupFlow"| Plan
 
-    Plan -->|"loadSkillManifest()"| Manifest["スキル目次<br>ファイルパス一覧"]:::dcc7
+    Plan -->|"loadSkillManifest()"| Manifest["スキル目次<br>ファイルパス一覧"]
 
-    CoachConfig --> Loop["startCoachLoop()"]
+    CoachConfig --> Loop["startCoachLoop()<br>initialMode: 'manual' (Web)<br>または 'auto' (CLI)"]
     Plan --> Loop
     Manifest --> Loop
     Ref --> Loop
 
     Loop -->|"buildCoachSystemPrompt()"| SysPrompt["システムプロンプト<br>+ スキル目次"]
-    Loop -->|"buildCoachUserPrompt()"| UserPrompt["ユーザープロンプト<br>+ スクリーンショット"]
+    Loop -->|"buildCoachUserPrompt(trigger)"| UserPrompt["ユーザープロンプト<br>+ スクリーンショット<br>(trigger 軸で 4 分岐)"]
 
     SysPrompt --> Engine["invokeClaude()"]
     UserPrompt --> Engine
 
-    Engine -->|"isSubagentsEnabled"| SDK["Claude Agent SDK<br>query()"]
+    Engine --> SDK["Claude Agent SDK<br>query()<br>(advisor + researcher)"]
     SDK --> Result["応答テキスト<br>or __SILENT__"]
-
-    classDef dcc7 fill:#e8eaf6,stroke:#5c6bc0
 ```
 
 ## キャプチャ・差分検知パイプライン
@@ -269,67 +263,102 @@ graph LR
 
 ## コーチングループ詳細
 
-### メインループフロー
+### メインループフロー（manual / auto 二モード制）
+
+`startCoachLoop()` は内部で `waitForNextTrigger()` を呼んで次の `RoundTrigger` を決定し、得られた trigger を `executeOneRound()` に渡す。trigger が無いケース（mode 切替や spurious wake）はループ先頭に戻って再判定する。
 
 ```mermaid
 flowchart TD
-    Start([ループ開始]) --> Capture[画面キャプチャ]
-    Capture -->|失敗| LogError[エラーログ出力]
-    LogError --> Sleep
+    Start([ループ開始<br>initialMode: manual or auto]) --> Init[LoopState 初期化<br>previousImage: null]
+    Init --> WaitTrig["waitForNextTrigger()"]
 
-    Capture -->|成功| CheckFirst{初回？}
-    CheckFirst -->|Yes| SaveFile[一時ファイルに保存]
-    CheckFirst -->|No| CheckMsg{ユーザー<br>メッセージあり？}
+    WaitTrig --> Decide{"次の trigger を決定"}
+    Decide -->|"queuedMessage あり"| TUser["trigger: user_message"]
+    Decide -->|"nextRoundGate.pending"| TManual["trigger: manual_next"]
+    Decide -->|"初回 + auto モード"| TInit["trigger: initial"]
+    Decide -->|"その他"| Wait["waitForNextRound()<br>(timer は auto モードのみ)"]
 
-    CheckMsg -->|Yes| SaveFile
-    CheckMsg -->|No| Diff[前回画像と差分検知]
+    Wait -->|"timer 満了"| TTimer["trigger: timer"]
+    Wait -->|"abort"| End([ループ終了])
+    Wait -->|"message 到着"| TUser
+    Wait -->|"next_round 要求"| TManual
+    Wait -->|"mode_changed"| WaitTrig
 
-    Diff -->|差分あり| SaveFile
-    Diff -->|差分なし| Sleep
+    TUser --> Execute["executeOneRound(trigger)"]
+    TManual --> Execute
+    TInit --> Execute
+    TTimer --> Execute
 
-    SaveFile --> Query[AI に問い合わせ]
-    Query --> ParseResult{応答を解析}
+    Execute --> Capture[captureScreen]
+    Capture -->|失敗| Emit1["emit: capture_failed"]
+    Emit1 --> WaitTrig
+    Capture -->|成功| Bypass{"shouldBypassDiffCheck<br>(trigger)"}
 
-    ParseResult -->|テキスト| ShowAdvice[ターミナルに表示]
-    ParseResult -->|__SILENT__| Silent[何も表示しない]
-    ParseResult -->|エラー| EngineError[エラーログ出力]
+    Bypass -->|"true (initial /<br>user_message / manual_next)"| Save[saveScreenshot]
+    Bypass -->|"false (timer)"| Diff{"前回画像と diff"}
+    Diff -->|"閾値以下"| Emit2["emit: no_change"]
+    Emit2 --> WaitTrig
+    Diff -->|"閾値超え"| Save
 
-    ShowAdvice --> Sleep
-    Silent --> Sleep
-    EngineError --> Sleep
-
-    Sleep[5秒スリープ] -->|タイマー満了| Capture
-    Sleep -->|ユーザー入力で中断| Capture
-    Sleep -->|Ctrl+C| Stop([ループ終了])
+    Save --> Query[invokeClaude<br>buildCoachUserPrompt(trigger)]
+    Query --> Parse{応答}
+    Parse -->|テキスト| EmitAdvice["emit: advice"]
+    Parse -->|__SILENT__| EmitSilent["emit: silent"]
+    Parse -->|エラー| EmitError["emit: engine_error"]
+    EmitAdvice --> WaitTrig
+    EmitSilent --> WaitTrig
+    EmitError --> WaitTrig
 ```
 
-### 双方向チャンネル（MessageBox パターン）
+### 「次へ進む」専用チャンネル: NextRoundGate
 
-ユーザーが stdin から入力したメッセージを MessageBox にバッファし、<br>ループ側の sleep を中断して即座に AI を呼び出す仕組み。
+ユーザーが「次へ進む」ボタンを押した場合、`messageBox` ではなく専用の `NextRoundGate`（`pending: boolean` 単一フラグの状態機械）を起こす。これにより:
+- **連打 dedupe**: 既に pending=true なら no-op。連打しても次の 1 ラウンドにまとめられる
+- **advice 履歴を汚さない**: messageBox を経由しないので `user_message_received` イベントは発火せず、偽のユーザー発話が advice 履歴に混入しない
+
+prompt には `manual_next` trigger を渡し、「ユーザーが次の指示を求めている」というメタ情報のみを伝える。
 
 ```mermaid
 sequenceDiagram
-    participant User as ユーザー（stdin）
-    participant RL as readline
+    participant UI as MessageInput
+    participant API as session.requestNextRound
+    participant CS as coach-session
+    participant Gate as NextRoundGate
+    participant Loop as メインループ
+
+    UI->>API: requestNextRound({ sessionId })
+    API->>CS: requestNextRound(sessionId)
+    CS->>Gate: request()
+    Note over Gate: pending = true<br>(既に true なら no-op)
+    Gate-->>Loop: waitForNextRound 中断
+
+    Loop->>Gate: consumePending() → true
+    Note over Gate: pending = false
+    Loop->>Loop: makeNextRoundTrigger() → manual_next
+    Loop->>Loop: executeOneRound(manual_next)
+
+    Note over UI,Loop: 連打しても pending は 1 枚<br>= 次の 1 ラウンド分しか溜まらない
+```
+
+### sendMessage（ユーザー発話）の経路
+
+これとは別に、ユーザーが Textarea からテキストを送信する `sendMessage` は従来通り `messageBox` 経由で `user_message` trigger としてループを起こす。`user_message_received` イベントが発火し、advice 履歴とは別レーンで「あなたの発話」として記録される。
+
+```mermaid
+sequenceDiagram
+    participant User as ユーザー
+    participant MI as MessageInput
+    participant API as session.sendMessage
     participant MB as MessageBox
     participant Loop as コーチループ
-    participant AI as Claude API
 
-    Note over Loop: 5秒スリープ中...
-
-    User->>RL: "ここどうすればいい？" + Enter
-    RL->>MB: submit("ここどうすればいい？")
-    MB-->>Loop: sleep 中断
-
-    Loop->>MB: consume()
-    MB-->>Loop: "ここどうすればいい？"
-
-    Loop->>Loop: 画面キャプチャ（diff はスキップ）
-    Loop->>AI: メッセージ + スクリーンショット
-    AI-->>Loop: 応答テキスト
-    Loop->>User: ターミナルに表示
-
-    Note over Loop: 再び5秒スリープ...
+    User->>MI: テキスト入力 + 送信
+    MI->>API: sendMessage({ message, images })
+    API->>MB: submit({ text, imagePaths })
+    MB-->>Loop: waitForNextRound 中断
+    Loop->>MB: consume() → UserMessage
+    Loop->>Loop: trigger=user_message<br>diff スキップで AI 呼び出し
+    Loop-->>MI: SSE: user_message_received → querying → advice
 ```
 
 ### AI の判断パターン
@@ -343,28 +372,77 @@ flowchart LR
     Judge -->|声かけ| Encourage["テキスト応答 → 表示"]
 
     UserMsg[ユーザーメッセージ<br>がある場合] -->|__SILENT__ 禁止| MustRespond["必ずテキストで応答"]
+    ManualNext[manual_next<br>「次へ進む」要求] -->|__SILENT__ は<br>完璧時のみ可| LikelyAdvice["原則何かしらの<br>フィードバックを返す"]
 ```
 
-### 3-case プロンプト分岐
+### 4-trigger プロンプト分岐
 
-AI に送るユーザープロンプトは状況に応じて 3 パターンに分岐する。
+`buildCoachUserPrompt()` は `RoundTrigger` を主軸に switch 分岐する。各 trigger の中で `isFirstRound`（初回キャプチャかどうか）を内部で扱う。**`isFirstRound` と `trigger` は直交した次元** として扱い、起動契機ごとに AI に伝えるべき文脈を切り替える。
 
 ```mermaid
 flowchart TD
-    BuildPrompt[buildCoachUserPrompt] --> IsFirst{初回ラウンド？}
+    BuildPrompt[buildCoachUserPrompt] --> Switch{switch trigger}
 
-    IsFirst -->|Yes| FirstPrompt["「最初のスクリーンショットです。<br>何をしようとしているか観察してください」"]
-    IsFirst -->|No| HasMsg{ユーザー<br>メッセージあり？}
+    Switch -->|initial| InitPrompt["「最初のスクリーンショットです」<br>(auto モード初回専用)"]
+    Switch -->|manual_next| MN{isFirstRound?}
+    Switch -->|user_message| UM{isFirstRound?}
+    Switch -->|timer| TimerPrompt["「前回から画面に変化がありました」"]
 
-    HasMsg -->|Yes| MsgPrompt["「ユーザーからメッセージがあります。<br>画面も参考にして回答してください」<br>+ メッセージ本文"]
-    HasMsg -->|No| DiffPrompt["「前回から画面に変化がありました」"]
+    MN -->|Yes| MN1["「最初のスクリーンショットです」<br>+ 「次へ進むで最初のアドバイスを<br>手動要求」"]
+    MN -->|No| MN2["「次へ進むで次のアドバイスを<br>手動要求」<br>(__SILENT__ は完璧時のみ可)"]
 
-    FirstPrompt --> Attach[+ スクリーンショットパス]
-    MsgPrompt --> Attach
-    DiffPrompt --> Attach
+    UM -->|Yes| UM1["初回プロンプト + メッセージ追記"]
+    UM -->|No| UM2["「ユーザーからメッセージがあります」<br>+ メッセージ本文"]
+
+    InitPrompt --> Attach[+ スクリーンショットパス<br>+ リファレンス画像<br>+ プランステップ一覧]
+    MN1 --> Attach
+    MN2 --> Attach
+    UM1 --> Attach
+    UM2 --> Attach
+    TimerPrompt --> Attach
 ```
 
+`manual_next` は **偽の発話を入れない**のがポイント。「やりました、次の指示をもらえますか？」のような架空のユーザー発話を作るのではなく、「ユーザーが次へ進むボタンで次のアドバイスを手動で要求した」というメタ情報を伝える。advice 履歴も汚染されない。
+
+### auto/manual 切替の race 対策
+
+auto モードで `waitForNextRound` が `setTimeout` を待っている最中に manual に切り替えると、放置すれば timer 満了で 1 ラウンド余計に走ってしまう。これを防ぐため、`ModeController.onChange` を `waitForNextRound` の wake 要因に組み込んでいる。
+
+```mermaid
+sequenceDiagram
+    participant UI as ダッシュボード
+    participant CS as coach-session
+    participant MC as ModeController
+    participant Loop as waitForNextRound
+
+    Note over Loop: auto モード中、timer (60s) を仕掛けて待機
+
+    UI->>CS: setMode({ mode: "manual" })
+    CS->>MC: set("manual")
+    MC->>MC: current = "manual"
+    MC-->>Loop: onChange() callback
+
+    Note over Loop: wakeUp("mode_changed")
+    Loop->>Loop: cleanup() → clearTimeout(timer)
+    Loop-->>CS: 戻り値 reason="mode_changed"
+
+    Note over CS: メインループ先頭に戻り<br>新 mode で再判定<br>= manual なので timer 仕掛けず wait
+```
+
+`setMode("auto")` の場合は逆に「即時 1 ラウンド実行」が UX 上自然なので、`setMode` の中で `nextRoundGate.request()` を内部から呼ぶ。これにより auto に切替えた瞬間にすぐ 1 ラウンド回る。
+
 ### グレースフルシャットダウン
+
+#### Web UI 版（@dcc/server）
+
+abort 経路:
+- ブラウザを閉じる / セッション切断 → SSE が切れるが、サーバー側の loop は **動き続ける**
+- 同セッションを再度 `coachSession.start()` した場合、前のループを `abortController.abort()` で停止してから新規起動
+- 明示的な `coachSession.stop()` で全終了
+
+`loopFinished` Promise の `.then` / `.catch` 両方で `endSession()` → `publish('stopped')` を実行する契約。これにより **成功/失敗いずれも client 側に終端を通知** する。`endSession()` は try/catch でガードされ、DB エラーで stopped 配信が止まらないようになっている。
+
+#### CLI 版（@dcc/cli）
 
 ```mermaid
 sequenceDiagram
@@ -381,7 +459,7 @@ sequenceDiagram
     AC-->>Loop: signal.aborted = true
     Loop->>Loop: while ループ脱出
     Loop->>Tmp: 一時ファイル削除
-    Loop-->>Process: done Promise 解決
+    Loop-->>Process: loopFinished Promise 解決
     Process->>Process: プロセス終了
 ```
 
@@ -728,18 +806,37 @@ sequenceDiagram
     participant Session as coach-session<br>(@dcc/server)
     participant Bus as EventBus
     participant Sub as tRPC subscription
-    participant UI as ブラウザ
+    participant Hook as useLoopEvents<br>(@dcc/client)
+    participant Cache as session.get<br>クエリキャッシュ
+    participant UI as React コンポーネント
 
     Loop->>Session: onEvent({ kind: "advice", ... })
     Session->>Bus: publish({ ...event, sessionId })
     Session->>Session: INSERT INTO advices
 
     Bus->>Sub: listener 呼び出し（sessionId フィルタ）
-    Sub-->>UI: SSE data: { kind: "advice", ... }
-    UI->>UI: useState で adviceHistory に追加
+    Sub-->>Hook: SSE data: { kind: "advice", ... }
+    Hook->>Cache: setData((prev) => advices に追加)
+    Cache-->>UI: useQuery が再レンダリング
 
-    Note over Loop,UI: 5秒後、次のラウンドへ...
+    Note over Loop,UI: manual モードなら次の<br>requestNextRound を待つ<br>auto モードなら interval 後に次へ
 ```
+
+> client は `useState` を使わず、すべての SSE イベントを `trpc.session.get` のクエリキャッシュに書き戻す **single source of truth** 設計（DCC-37 で改修）。フック内 state とキャッシュの二重管理 race を構造的に防ぐ。
+
+#### 主要 LoopEvent と client 側の処理
+
+| event.kind | サーバー発火元 | client 側の処理 |
+|---|---|---|
+| `advice` | coach-loop | `advices` 配列に追加、ローディング解除 |
+| `silent` | coach-loop | ローディング解除のみ（履歴汚さない） |
+| `engine_error` | coach-loop / coach-session（クラッシュ時） | エラー文言表示、ローディング解除 |
+| `no_change` | coach-loop（diff 閾値未満） | ローディング解除のみ |
+| `querying` | coach-loop（AI 呼び出し直前） | 「次へ進む」ローディング表示開始 |
+| `mode_changed` | coach-loop（setMode 時） | キャッシュの `mode` を上書き、Switch 同期 |
+| `plan_step_updated` | coach-loop / DB 経由 | プランステップの status 更新 |
+| `stopped` | coach-session（成功/失敗問わず） | `endedAt` を埋めて UI を終端状態に |
+| `user_message_received` | coach-loop（user_message trigger 時） | （現在は client 側で特別処理なし） |
 
 ### DBスキーマ
 
@@ -813,7 +910,7 @@ bun run start:web  → packages/server/src/index.ts  → @dcc/core + Hono + tRPC
 flowchart LR
     subgraph trpc ["tRPC ルーター (src/trpc/)"]
         Router["appRouter"]
-        Session["sessionRouter<br>list / get / sendMessage / restore"]
+        Session["sessionRouter<br>list / get / sendMessage / restore<br>setMode / requestNextRound /<br>updateStepStatus"]
         Plan["planRouter<br>generate"]
         Setup["setupRouter<br>start"]
         Display["displayRouter<br>list"]
@@ -859,13 +956,18 @@ flowchart LR
 | ルーター | プロシージャ | 種類 | 役割 |
 |---------|------------|------|------|
 | session | list | query | セッション一覧（プランステップ数付き） |
-| session | get | query | セッション詳細（プラン + アドバイス履歴） |
+| session | get | query | セッション詳細（プラン + アドバイス履歴 + `mode`） |
 | session | sendMessage | mutation | アクティブセッションへユーザーメッセージ送信 |
+| session | setMode | mutation | manual / auto モード切替（DCC-37） |
+| session | requestNextRound | mutation | 「次へ進む」要求。連打 dedupe は backend 側で処理（DCC-37） |
+| session | updateStepStatus | mutation | プランステップの完了/未完了切替 |
 | session | restore | mutation | 過去セッションのアドバイス履歴を引き継いで新セッション作成 |
 | plan | generate | mutation | リファレンス画像 + 目標からプラン生成 |
 | setup | start | mutation | キャッシュ済みプランでセッション開始 |
 | display | list | query | 接続ディスプレイ一覧 |
 | events | subscribe | subscription | SSE でリアルタイムイベント配信（sessionId フィルタ） |
+
+> 旧仕様の `session.pause` / `session.resume` は **削除済み**（DCC-37）。manual/auto モードの 2 状態制で pause は冗長になったため。
 
 ## セッション復元フロー
 
@@ -900,22 +1002,26 @@ sequenceDiagram
 
 ## ユーザーメッセージ送信フロー
 
-ダッシュボードからコーチに質問を送る機能。
+ダッシュボードからコーチに質問を送る機能。`sendMessage` は「自由入力テキスト + 添付画像」を送る経路で、`requestNextRound` とは別チャンネル。
 
 ```mermaid
 sequenceDiagram
     participant UI as MessageInput
     participant API as session.sendMessage
     participant CS as CoachSession
-    participant Loop as Coーチングループ
+    participant Loop as コーチングループ
 
-    UI->>API: sendMessage({ sessionId, content })
-    API->>CS: submitMessage(sessionId, content)
-    CS->>Loop: loop.submitMessage(content)
-    Note over Loop: MessageBox にバッファ<br>→ sleep を中断<br>→ diff スキップで即座に AI 呼び出し
+    UI->>API: sendMessage({ sessionId, message, images? })
+    API->>CS: submitMessage(sessionId, { text, imagePaths })
+    CS->>Loop: loop.submitMessage(message)
+    Note over Loop: messageBox にバッファ<br>→ waitForNextRound 中断<br>→ trigger=user_message でラウンド実行<br>→ diff スキップで即座に AI 呼び出し
+    Loop-->>CS: onEvent({ kind: "user_message_received", ... })
+    Loop-->>CS: onEvent({ kind: "querying" })
     Loop-->>CS: onEvent({ kind: "advice", ... })
     CS-->>UI: SSE で配信
 ```
+
+「次へ進む」（`requestNextRound`）の方は messageBox を経由せず `NextRoundGate` を起こすだけ。advice 履歴を汚さず、prompt には `manual_next` trigger 経由でメタ情報のみ伝わる（前述の「コーチングループ詳細」セクション参照）。
 
 ## CI/CD（GitHub Actions）
 
@@ -935,30 +1041,38 @@ sequenceDiagram
 stateDiagram-v2
     [*] --> setup
     setup --> coaching : onCoachingStarted
-    setup --> sessions : onNavigateToSessions
-    coaching --> sessions : onNavigateToSessions
+    setup --> sessions : ヘッダー Sessions
+    coaching --> sessions : ヘッダー Sessions
     coaching --> setup : onBackToSetup
-    sessions --> setup : onNavigateToSetup
+    sessions --> setup : ヘッダー Setup
     sessions --> coaching : onRestore
 ```
 
 | フェーズ | ページ | 主なコンポーネント |
 |---------|-------|------------------|
 | setup | SetupPage | DisplaySelector, ReferenceUploader, GoalInput, PlanReview |
-| coaching | DashboardPage | LatestAdvice, PlanProgress, AdviceTimeline, MessageInput |
+| coaching | DashboardPage | LatestAdvice, PlanProgress, AdviceTimeline, MessageInput, Switch（モードトグル） |
 | sessions | SessionListPage / SessionDetailPage | セッション一覧, 復元ボタン, 過去アドバイス閲覧 |
 
 ### SSE サブスクリプション
 
-`useLoopEvents` カスタムフックが `trpc.events.subscribe` を購読し、リアルタイムでダッシュボードを更新する。
+`useLoopEvents` カスタムフックが `trpc.events.subscribe` を購読し、`trpc.session.get` のクエリキャッシュを直接更新する（state を持たない設計、DCC-37 で改修）。
 
 | イベント種別 | 処理 |
 |------------|------|
-| advice | adviceHistory に追加 |
-| plan_step_updated | プランステップの status を更新 |
-| stopped | コーチング終了表示 |
+| `advice` | キャッシュの `advices` に追加 + ローディング解除 |
+| `silent` / `engine_error` / `no_change` / `diff_skipped` / `session_lost` / `capture_failed` | ローディング解除のみ |
+| `querying` | 「次へ進む」ローディング表示開始 |
+| `mode_changed` | キャッシュの `mode` を上書き、Switch 同期 |
+| `plan_step_updated` | プランステップの status を更新 |
+| `stopped` | キャッシュの `endedAt` を埋めて UI を終端状態に |
+
+詳細は [packages/client/docs/reading-guide.md](../packages/client/docs/reading-guide.md) を参照。
 
 ## 関連ドキュメント
 
 - [プロジェクト思想](./memory/README.md) — 「隣に座っている先輩デザイナー」の考え方
 - [ロードマップ](./roadmap/loadmap.md) — Phase 1-6 の開発計画
+- [@dcc/core リーディングガイド](../packages/core/docs/reading-guide.md) — coach-loop / prompts / agents の内部構造
+- [@dcc/server リーディングガイド](../packages/server/docs/reading-guide.md) — coach-session / SSE / DB の内部構造
+- [@dcc/client リーディングガイド](../packages/client/docs/reading-guide.md) — React + tRPC + クエリキャッシュ単一ソースの設計

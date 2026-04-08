@@ -1,4 +1,4 @@
-import type { PlanStepStatus } from "@dcc/core";
+import type { LoopMode, PlanStepStatus } from "@dcc/core";
 import { TRPCError } from "@trpc/server";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -26,6 +26,8 @@ const planStepStatusSchema = z.enum([
   "in_progress",
   "completed",
 ]) satisfies z.ZodType<PlanStepStatus>;
+
+const loopModeSchema = z.enum(["manual", "auto"]) satisfies z.ZodType<LoopMode>;
 
 export const sessionRouter = router({
   list: publicProcedure.query(({ ctx }) => {
@@ -77,7 +79,7 @@ export const sessionRouter = router({
         timestampMs: a.timestampMs,
         isRestored: a.isRestored === 1,
       })),
-      isPaused: ctx.coachSession.isSessionPaused(input.id),
+      mode: ctx.coachSession.getMode(input.id),
     };
   }),
 
@@ -144,8 +146,13 @@ export const sessionRouter = router({
       return { success: true };
     }),
 
-  pause: publicProcedure
-    .input(z.object({ sessionId: z.string().uuid() }))
+  setMode: publicProcedure
+    .input(
+      z.object({
+        sessionId: z.string().uuid(),
+        mode: loopModeSchema,
+      }),
+    )
     .mutation(({ input, ctx }) => {
       if (!ctx.coachSession.isSessionActive(input.sessionId)) {
         throw new TRPCError({
@@ -153,14 +160,14 @@ export const sessionRouter = router({
           message: "アクティブなセッションが見つかりません",
         });
       }
-      const result = ctx.coachSession.pause(input.sessionId);
+      const result = ctx.coachSession.setMode(input.sessionId, input.mode);
       if (!result.isOk) {
         throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });
       }
-      return { success: true };
+      return { success: true, mode: input.mode };
     }),
 
-  resume: publicProcedure
+  requestNextRound: publicProcedure
     .input(z.object({ sessionId: z.string().uuid() }))
     .mutation(({ input, ctx }) => {
       if (!ctx.coachSession.isSessionActive(input.sessionId)) {
@@ -169,7 +176,7 @@ export const sessionRouter = router({
           message: "アクティブなセッションが見つかりません",
         });
       }
-      const result = ctx.coachSession.resume(input.sessionId);
+      const result = ctx.coachSession.requestNextRound(input.sessionId);
       if (!result.isOk) {
         throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });
       }

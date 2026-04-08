@@ -55,6 +55,9 @@ export function printLoopEvent(event: LoopEvent): void {
       console.log(`  [Plan] Step ${event.stepIndex}: ${label}`);
       break;
     }
+    case "mode_changed":
+      console.log(`  [mode] ${event.mode === "auto" ? "自動モード" : "手動モード"}に切替`);
+      break;
     case "stopped":
       console.log(`\n${SEPARATOR}`);
       console.log("  DCC Coach - セッション終了");

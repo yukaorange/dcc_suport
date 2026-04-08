@@ -1,12 +1,10 @@
-import { Play } from "lucide-react";
+import type { LoopMode } from "@dcc/core";
+import { ArrowRight, Loader2, Play } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ACCEPTED_IMAGE_TYPES, readFileAsBase64 } from "@/lib/image-file";
 import { trpc } from "../../trpc";
-
-// 「できました」「完了」等のステップ進捗を示唆する語は避ける（ステップ進捗を動かさないため）
-const NEXT_INSTRUCTION_MESSAGE = "やりました、次の指示をもらえますか？";
 
 type AttachedImage = {
   readonly id: string;
@@ -17,24 +15,39 @@ type AttachedImage = {
 
 type MessageInputProps = {
   readonly sessionId: string;
-  readonly isPaused: boolean;
+  readonly mode: LoopMode;
+  // 親 (CoachingFeed) が SSE 経由で同期しているラウンド進行状態。
+  // 「次へ進む」のローディング表示と多重押下抑止に使う。
+  readonly isRoundPending: boolean;
+  readonly onRoundPendingChange: (pending: boolean) => void;
 };
 
 const MAX_ATTACHMENTS = 3;
 
-export function MessageInput({ sessionId, isPaused }: MessageInputProps) {
+export function MessageInput({
+  sessionId,
+  mode,
+  isRoundPending,
+  onRoundPendingChange,
+}: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [attachedImages, setAttachedImages] = useState<readonly AttachedImage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const mutation = trpc.session.sendMessage.useMutation();
+  const sendMutation = trpc.session.sendMessage.useMutation();
+  const nextRoundMutation = trpc.session.requestNextRound.useMutation();
 
   const canSend = message.trim().length > 0 || attachedImages.length > 0;
+  const isAnyPending = sendMutation.isPending || nextRoundMutation.isPending;
+
+  // 下書き/添付があるときは無効化（「次へ進む」は素手で次を催促するボタンのため）。
+  // ラウンド進行中（isRoundPending）も多重押下抑止のため無効化する。
+  const canRequestNext = !canSend && !isAnyPending && !isRoundPending;
 
   const handleSubmit = () => {
     if (!canSend) return;
 
     const trimmed = message.trim();
-    mutation.mutate(
+    sendMutation.mutate(
       {
         sessionId,
         message: trimmed.length > 0 ? trimmed : undefined,
@@ -52,14 +65,19 @@ export function MessageInput({ sessionId, isPaused }: MessageInputProps) {
     );
   };
 
-  // ステップ内のミクロ操作を1つこなしたあと、次の指示をコーチに即催促する
-  const handleRequestNextInstruction = () => {
-    if (mutation.isPending) return;
-    mutation.mutate({ sessionId, message: NEXT_INSTRUCTION_MESSAGE });
+  const handleRequestNextRound = () => {
+    if (!canRequestNext) return;
+    // クリック直後の即時フィードバック。SSE querying 到着前にローディングを出す。
+    // mutation 失敗時は onError で false に戻す。成功時は SSE 側で advice/silent/etc が
+    // 流れてくるまで true のままにし、ラウンド完了時に false へ落ちる。
+    onRoundPendingChange(true);
+    nextRoundMutation.mutate(
+      { sessionId },
+      {
+        onError: () => onRoundPendingChange(false),
+      },
+    );
   };
-
-  // 下書き/添付があるときは無効化（クイックボタンはあくまで「素手で次を催促」用途）
-  const canRequestNext = !canSend && !mutation.isPending;
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -95,6 +113,55 @@ export function MessageInput({ sessionId, isPaused }: MessageInputProps) {
 
   const handleRemoveImage = (imageId: string) => {
     setAttachedImages(attachedImages.filter((img) => img.id !== imageId));
+  };
+
+  // mode に応じて「次へ進む」ボタンの表現を切替（switch で網羅: RULE-006）
+  const renderNextRoundButton = () => {
+    switch (mode) {
+      case "manual":
+        return (
+          <Button
+            type="button"
+            onClick={handleRequestNextRound}
+            disabled={!canRequestNext}
+            className="shrink-0 rounded-xl px-6"
+            aria-live="polite"
+          >
+            {isRoundPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                コーチが応答中...
+              </>
+            ) : (
+              <>
+                <ArrowRight className="mr-2 h-4 w-4" />
+                次へ進む
+              </>
+            )}
+          </Button>
+        );
+      case "auto":
+        return (
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-label={isRoundPending ? "コーチが応答中" : "次のラウンドを即実行"}
+            title={
+              isRoundPending ? "コーチが応答中..." : "次のラウンドを即実行（タイマーを待たず実行）"
+            }
+            onClick={handleRequestNextRound}
+            disabled={!canRequestNext}
+            className="shrink-0 rounded-xl"
+          >
+            {isRoundPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="h-4 w-4" />
+            )}
+          </Button>
+        );
+    }
   };
 
   return (
@@ -134,7 +201,7 @@ export function MessageInput({ sessionId, isPaused }: MessageInputProps) {
             size="sm"
             className="shrink-0 rounded-xl px-3"
             onClick={() => fileInputRef.current?.click()}
-            disabled={mutation.isPending}
+            disabled={sendMutation.isPending}
           >
             📎
           </Button>
@@ -144,38 +211,27 @@ export function MessageInput({ sessionId, isPaused }: MessageInputProps) {
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={
-            isPaused
-              ? "メッセージを送信するとコーチングが再開します（⌘+Enter で送信）"
+            mode === "manual"
+              ? "コーチにメッセージを送る。何もなければ「次へ進む」で次ラウンドを開始（⌘+Enter で送信）"
               : "コーチにメッセージを送る（⌘+Enter で送信）"
           }
           className="min-h-[40px] resize-none rounded-xl"
           rows={1}
-          disabled={mutation.isPending}
+          disabled={sendMutation.isPending}
         />
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          aria-label="次の指示をもらう"
-          title="次の指示をもらう（下書き・添付があるときは無効）"
-          onClick={handleRequestNextInstruction}
-          disabled={!canRequestNext}
-          className="shrink-0 rounded-xl"
-        >
-          <Play className="h-4 w-4" />
-        </Button>
+        {renderNextRoundButton()}
         <Button
           onClick={handleSubmit}
-          disabled={!canSend || mutation.isPending}
+          disabled={!canSend || sendMutation.isPending}
           className="shrink-0 rounded-xl px-6"
         >
           送信
         </Button>
       </div>
-      {mutation.error !== null && (
+      {(sendMutation.error !== null || nextRoundMutation.error !== null) && (
         <div className="mx-auto max-w-6xl px-6 pb-2">
           <p className="text-sm text-destructive">
-            メッセージの送信に失敗しました。コーチングセッションが終了している可能性があります。
+            リクエストに失敗しました。セッションが終了している可能性があります。
           </p>
         </div>
       )}

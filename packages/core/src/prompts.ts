@@ -1,4 +1,4 @@
-import type { UserMessage } from "./coach-loop";
+import type { RoundTrigger, UserMessage } from "./loop-types";
 import type { Plan } from "./planner";
 
 type ReferenceImageEntry = {
@@ -23,6 +23,7 @@ export type { RestoredAdvice };
 type CoachPromptInput = {
   readonly screenshotPath: string;
   readonly isFirstRound: boolean;
+  readonly trigger: RoundTrigger;
   readonly userMessage: UserMessage | null;
   readonly referenceImages: readonly ReferenceImageEntry[];
   readonly plan: Plan | null;
@@ -213,35 +214,85 @@ function formatUserMessageBlock(userMessage: UserMessage): string {
 export function buildCoachUserPrompt(input: CoachPromptInput): string {
   const screenshotLine = `現在の作業画面: ${input.screenshotPath}`;
 
+  switch (input.trigger) {
+    case "initial":
+      return buildInitialPrompt(input, screenshotLine);
+    case "manual_next":
+      return buildManualNextPrompt(input, screenshotLine);
+    case "user_message":
+      return buildUserMessagePrompt(input, screenshotLine);
+    case "timer":
+      return `前回から画面に変化がありました。\n\n${screenshotLine}`;
+  }
+}
+
+// auto モード: セッション開始時の自動初回キャプチャ
+function buildInitialPrompt(input: CoachPromptInput, screenshotLine: string): string {
+  const parts: string[] = ["これはセッション開始後の最初のスクリーンショットです。"];
+  appendReferenceImagesBlock(parts, input.referenceImages);
+  if (input.plan !== null) {
+    parts.push(
+      "制作プランが設定されています。プランの最初のステップに基づいてアドバイスの準備をしてください。",
+    );
+  }
+  parts.push(screenshotLine);
+  return parts.join("\n\n");
+}
+
+// manual モード: ユーザーが「次へ進む」を押した契機。初回キャプチャと通常ケースの両方を扱う
+function buildManualNextPrompt(input: CoachPromptInput, screenshotLine: string): string {
+  if (input.isFirstRound) {
+    const parts: string[] = [
+      "これはセッション開始後の最初のスクリーンショットです。",
+      "ユーザーが「次へ進む」ボタンで最初のアドバイスを手動で要求しました。明示的な指示要求なので、現在の画面に対して具体的なフィードバックを返してください。",
+    ];
+    appendReferenceImagesBlock(parts, input.referenceImages);
+    if (input.plan !== null) {
+      parts.push("制作プランがあります。最初のステップに基づいてアドバイスしてください。");
+    }
+    parts.push(screenshotLine);
+    return parts.join("\n\n");
+  }
+  return `ユーザーが「次へ進む」ボタンで次のアドバイスを手動で要求しました。
+現在の作業状況を確認し、次にやるべきこと・改善点・静観すべきかの判断を返してください。
+ユーザーは明示的に次の指示を求めているため、現在の画面に対して何かしらフィードバックするのが望ましいです。
+（ただし、明らかに作業が完璧で言うことがない場合に限り __SILENT__ を返してもかまいません）
+
+${screenshotLine}`;
+}
+
+// user_message: ユーザーがテキスト/画像を送信した契機
+function buildUserMessagePrompt(input: CoachPromptInput, screenshotLine: string): string {
   if (input.isFirstRound) {
     const parts: string[] = ["これはセッション開始後の最初のスクリーンショットです。"];
-
-    if (input.referenceImages.length > 0) {
-      const imageLines = input.referenceImages
-        .map((img, i) => {
-          const labelText = img.label.length > 0 ? ` (${img.label})` : "";
-          return `リファレンス画像${i + 1}: ${img.path}${labelText}`;
-        })
-        .join("\n");
-      parts.push(imageLines);
-    }
+    appendReferenceImagesBlock(parts, input.referenceImages);
     if (input.plan !== null) {
       parts.push(
         "制作プランが設定されています。プランの最初のステップに基づいてアドバイスの準備をしてください。",
       );
     }
-
     parts.push(screenshotLine);
-
-    const base = parts.join("\n\n");
-    return input.userMessage !== null
-      ? `${base}\n\n${formatUserMessageBlock(input.userMessage)}`
-      : base;
+    if (input.userMessage !== null) {
+      parts.push(formatUserMessageBlock(input.userMessage));
+    }
+    return parts.join("\n\n");
   }
-
-  if (input.userMessage !== null) {
-    return `ユーザーからメッセージがあります。現在の画面も参考にして回答してください。\n\n${screenshotLine}\n\n${formatUserMessageBlock(input.userMessage)}`;
+  if (input.userMessage === null) {
+    return `前回から画面に変化がありました。\n\n${screenshotLine}`;
   }
+  return `ユーザーからメッセージがあります。現在の画面も参考にして回答してください。\n\n${screenshotLine}\n\n${formatUserMessageBlock(input.userMessage)}`;
+}
 
-  return `前回から画面に変化がありました。\n\n${screenshotLine}`;
+function appendReferenceImagesBlock(
+  parts: string[],
+  referenceImages: readonly ReferenceImageEntry[],
+): void {
+  if (referenceImages.length === 0) return;
+  const imageLines = referenceImages
+    .map((img, i) => {
+      const labelText = img.label.length > 0 ? ` (${img.label})` : "";
+      return `リファレンス画像${i + 1}: ${img.path}${labelText}`;
+    })
+    .join("\n");
+  parts.push(imageLines);
 }

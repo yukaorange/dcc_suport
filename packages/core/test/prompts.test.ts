@@ -10,10 +10,11 @@ const BASE_INPUT = {
 } as const;
 
 describe("buildCoachUserPrompt", () => {
-  test("初回ラウンドでメッセージなしの場合、観察を促すプロンプトが生成される", () => {
+  test("初回ラウンド（initial trigger）でメッセージなしの場合、観察を促すプロンプトが生成される", () => {
     const result = buildCoachUserPrompt({
       screenshotPath: "/tmp/test.png",
       isFirstRound: true,
+      trigger: "initial",
       userMessage: null,
       ...BASE_INPUT,
     });
@@ -23,10 +24,11 @@ describe("buildCoachUserPrompt", () => {
     expect(result).not.toContain("前回から画面に変化がありました");
   });
 
-  test("初回ラウンドでメッセージありの場合、観察プロンプトにメッセージが追記される", () => {
+  test("初回ラウンド（user_message trigger）でメッセージありの場合、観察プロンプトにメッセージが追記される", () => {
     const result = buildCoachUserPrompt({
       screenshotPath: "/tmp/test.png",
       isFirstRound: true,
+      trigger: "user_message",
       userMessage: { text: "レイヤーの使い方を教えて", imagePaths: [] },
       ...BASE_INPUT,
     });
@@ -37,10 +39,11 @@ describe("buildCoachUserPrompt", () => {
     expect(result).not.toContain("前回から画面に変化がありました");
   });
 
-  test("2回目以降でメッセージありの場合、メッセージ応答用プロンプトが生成される", () => {
+  test("2回目以降（user_message trigger）でメッセージありの場合、メッセージ応答用プロンプトが生成される", () => {
     const result = buildCoachUserPrompt({
       screenshotPath: "/tmp/test.png",
       isFirstRound: false,
+      trigger: "user_message",
       userMessage: { text: "色の調整方法は？", imagePaths: [] },
       ...BASE_INPUT,
     });
@@ -51,10 +54,11 @@ describe("buildCoachUserPrompt", () => {
     expect(result).not.toContain("前回から画面に変化がありました");
   });
 
-  test("2回目以降でメッセージなしの場合、画面変化通知プロンプトが生成される", () => {
+  test("timer trigger の場合、画面変化通知プロンプトが生成される", () => {
     const result = buildCoachUserPrompt({
       screenshotPath: "/tmp/test.png",
       isFirstRound: false,
+      trigger: "timer",
       userMessage: null,
       ...BASE_INPUT,
     });
@@ -64,38 +68,77 @@ describe("buildCoachUserPrompt", () => {
     expect(result).not.toContain("ユーザーからメッセージがあります");
   });
 
+  test("manual_next trigger の通常ケースで「次へ進む」コンテキストが伝わる", () => {
+    const result = buildCoachUserPrompt({
+      screenshotPath: "/tmp/test.png",
+      isFirstRound: false,
+      trigger: "manual_next",
+      userMessage: null,
+      ...BASE_INPUT,
+    });
+
+    expect(result).toContain("「次へ進む」");
+    expect(result).toContain("ユーザーは明示的に次の指示を求めている");
+  });
+
+  test("manual_next trigger の初回ラウンドでも「次へ進む」コンテキストが伝わる", () => {
+    const result = buildCoachUserPrompt({
+      screenshotPath: "/tmp/test.png",
+      isFirstRound: true,
+      trigger: "manual_next",
+      userMessage: null,
+      ...BASE_INPUT,
+    });
+
+    expect(result).toContain("最初のスクリーンショットです");
+    expect(result).toContain("「次へ進む」");
+    expect(result).toContain("最初のアドバイスを手動で要求");
+  });
+
   test("全ケースでスクリーンショットパスがプロンプトに含まれる", () => {
     const path = "/custom/path/screenshot.png";
 
-    const firstNoMsg = buildCoachUserPrompt({
+    const firstInitial = buildCoachUserPrompt({
       screenshotPath: path,
       isFirstRound: true,
+      trigger: "initial",
       userMessage: null,
       ...BASE_INPUT,
     });
     const firstWithMsg = buildCoachUserPrompt({
       screenshotPath: path,
       isFirstRound: true,
+      trigger: "user_message",
       userMessage: { text: "test", imagePaths: [] },
       ...BASE_INPUT,
     });
     const laterWithMsg = buildCoachUserPrompt({
       screenshotPath: path,
       isFirstRound: false,
+      trigger: "user_message",
       userMessage: { text: "test", imagePaths: [] },
       ...BASE_INPUT,
     });
-    const laterNoMsg = buildCoachUserPrompt({
+    const laterTimer = buildCoachUserPrompt({
       screenshotPath: path,
       isFirstRound: false,
+      trigger: "timer",
+      userMessage: null,
+      ...BASE_INPUT,
+    });
+    const manualNext = buildCoachUserPrompt({
+      screenshotPath: path,
+      isFirstRound: false,
+      trigger: "manual_next",
       userMessage: null,
       ...BASE_INPUT,
     });
 
-    expect(firstNoMsg).toContain(path);
+    expect(firstInitial).toContain(path);
     expect(firstWithMsg).toContain(path);
     expect(laterWithMsg).toContain(path);
-    expect(laterNoMsg).toContain(path);
+    expect(laterTimer).toContain(path);
+    expect(manualNext).toContain(path);
   });
 });
 
@@ -114,6 +157,7 @@ describe("buildCoachUserPrompt — リファレンス・プラン関連", () => 
     const result = buildCoachUserPrompt({
       screenshotPath: "/tmp/test.png",
       isFirstRound: true,
+      trigger: "initial",
       userMessage: null,
       referenceImages: [{ path: "/tmp/ref.png", label: "" }],
       plan: null,
@@ -126,6 +170,7 @@ describe("buildCoachUserPrompt — リファレンス・プラン関連", () => 
     const result = buildCoachUserPrompt({
       screenshotPath: "/tmp/test.png",
       isFirstRound: true,
+      trigger: "initial",
       userMessage: null,
       referenceImages: [],
       plan: SAMPLE_PLAN,

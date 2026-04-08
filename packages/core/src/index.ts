@@ -16,6 +16,7 @@ export { checkSessionContinuity, invokeClaude } from "./engine";
 export { extractVideoContent, YOUTUBE_URL_PATTERN } from "./gemini";
 export type { DisplayInfo, ListDisplaysResult } from "./list-displays";
 export { listDisplays } from "./list-displays";
+export type { LoopMode, RoundTrigger } from "./loop-types";
 export type { SetupEvent } from "./output";
 export { printLoopEvent, printSetupEvent } from "./output";
 export { COACH_TEMP_DIR, EXTRACT_VIDEO_SCRIPT, SKILLS_ROOT } from "./paths";

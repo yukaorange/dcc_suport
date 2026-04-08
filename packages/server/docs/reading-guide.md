@@ -1,6 +1,6 @@
 # @dcc/server リーディングガイド
 
-> 最終更新: 2026-03-17
+> 最終更新: 2026-04-08
 
 ## このパッケージの役割
 
@@ -212,14 +212,16 @@ flowchart LR
     EV -->|"yield event"| SSE
 
     CL -->|"loopFinished"| CS
-    CS -->|"stopped / error を後付けで publish"| EB
+    CS -->|"endSession() → stopped を publish"| EB
     CS --> SESS
 
     style EB fill:#fff3e0
     style CS fill:#e8f5e9
 ```
 
-> **注意**: `stopped` イベントは core の coach-loop が発火するのではなく、server の `coach-session.ts` が `loopFinished` Promise 解決後に EventBus へ publish する。
+> **注意**: `stopped` イベントは core の coach-loop が発火するのではなく、server の `coach-session.ts` が `loopFinished` Promise の `.then` / `.catch` 両方で EventBus へ publish する。「成功/失敗問わずループが終端した」というセマンティクスを backend が保証する契約。`.catch` 経路では `engine_error` の後に `stopped` も流す。
+>
+> **順序が重要**: `stopped` を publish する**前**に `endSession()` を呼んで DB の `endedAt` を埋める。client が `stopped` 受信時に `session.get` を invalidate（再取得）しても `endedAt` が NULL のまま返らないようにするため。
 
 **読むべきファイル**: `lib/coach-session.ts`（イベントハンドラ部分）→ `pure/event-bus.ts` → `trpc/routers/events.ts`
 
@@ -291,13 +293,46 @@ erDiagram
 ```mermaid
 stateDiagram-v2
     [*] --> Idle: createCoachSession()
-    Idle --> Active: start(options)
+    Idle --> Active: start(options)\ninitialMode: "manual" で起動
     Active --> Active: start(options)\n前ループを abort して新ループ起動
+    Active --> Active: setMode(mode)\nmanual ⇄ auto 切替
+    Active --> Active: requestNextRound()\n「次へ進む」要求
     Active --> Idle: loopFinished\n(activeState をリセット)
     Active --> Idle: stop()\n(abort → loopFinished)
 ```
 
 内部状態は `activeState: { sessionId, loop, abortController } | null` の単一オブジェクトで管理。
+
+`CoachSessionHandle` の API:
+
+| メソッド | 役割 |
+|---|---|
+| `start(options)` | コーチングループ起動。常に `initialMode: "manual"` で開始 |
+| `getMode(sessionId)` | 現在のモード取得（非アクティブなら `null`） |
+| `setMode(sessionId, mode)` | manual/auto 切替を core 層に委譲 |
+| `requestNextRound(sessionId)` | 「次へ進む」要求を core 層に委譲（連打 dedupe は core 側） |
+| `submitMessage(sessionId, msg)` | ユーザーメッセージ送信 |
+| `stop()` | abort で全終了 |
+
+旧仕様の `pause` / `resume` / `isSessionPaused` は **削除済み**。`setMode("manual")` で「自動ループを止める」という意味になる。
+
+### `loopFinished` Promise の終端処理
+
+```mermaid
+flowchart TD
+    LF["loop.loopFinished"]
+    LF -->|".then (正常終了)"| OK1["endSession(db, sessionId)"]
+    OK1 --> OK2["publish 'stopped'"]
+
+    LF -->|".catch (例外)"| NG1["endSession(db, sessionId)"]
+    NG1 --> NG2["publish 'engine_error'"]
+    NG2 --> NG3["publish 'stopped'<br/>(成功/失敗問わず終端を保証)"]
+
+    OK2 --> Final[".finally → activeState = null"]
+    NG3 --> Final
+```
+
+`.catch` 経路でも `stopped` を流すことで、client は「`stopped` を見ればループが終端した」と単一ルールで扱える。`engine_error` を別途特別扱いする必要がない。
 
 ## 読む順番の推奨
 

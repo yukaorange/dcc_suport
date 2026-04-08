@@ -1,46 +1,22 @@
 import type { PlanStepStatus } from "@dcc/core";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { trpc } from "../trpc";
 
-type Advice = {
-  readonly content: string;
-  readonly roundIndex: number;
-  readonly timestampMs: number;
-  readonly isRestored: boolean;
+type UseLoopEventsArgs = {
+  readonly sessionId: string;
+  readonly isEnabled: boolean;
+  readonly onPlanStepUpdated?: (stepIndex: number, newStatus: PlanStepStatus) => void;
 };
 
-type InitialState = {
-  readonly advices: readonly Advice[];
-  readonly isStopped: boolean;
-  readonly isPaused: boolean;
-};
-
-type LoopEventsResult = {
-  readonly adviceHistory: readonly Advice[];
-  readonly latestAdvice: Advice | null;
-  readonly isCoachingStopped: boolean;
-  readonly isCoachingPaused: boolean;
-};
-
-export function useLoopEvents(
-  sessionId: string,
-  isEnabled: boolean,
-  initialState: InitialState,
-  onPlanStepUpdated?: (stepIndex: number, newStatus: PlanStepStatus) => void,
-): LoopEventsResult {
-  const [adviceHistory, setAdviceHistory] = useState<readonly Advice[]>(initialState.advices);
-  const [isCoachingStopped, setIsCoachingStopped] = useState(initialState.isStopped);
-  const [isCoachingPaused, setIsCoachingPaused] = useState(initialState.isPaused);
-
-  const prevSessionIdRef = useRef(sessionId);
-
-  if (prevSessionIdRef.current !== sessionId) {
-    prevSessionIdRef.current = sessionId;
-    setAdviceHistory(initialState.advices);
-    setIsCoachingStopped(initialState.isStopped);
-    setIsCoachingPaused(initialState.isPaused);
-  }
-
+// SSE 購読の副作用フック。state を持たず、すべての更新は
+// trpc.session.get のクエリキャッシュを single source of truth として書き換える。
+// これにより client 側で「フック内 state とキャッシュの二重管理」が起きない。
+export function useLoopEvents({
+  sessionId,
+  isEnabled,
+  onPlanStepUpdated,
+}: UseLoopEventsArgs): void {
+  const utils = trpc.useUtils();
   const onPlanStepUpdatedRef = useRef(onPlanStepUpdated);
   useEffect(() => {
     onPlanStepUpdatedRef.current = onPlanStepUpdated;
@@ -53,26 +29,43 @@ export function useLoopEvents(
       onData: (event) => {
         switch (event.kind) {
           case "advice":
-            setAdviceHistory((prev) => [...prev, { ...event.advice, isRestored: false }]);
+            utils.session.get.setData({ id: sessionId }, (prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                advices: [...prev.advices, { ...event.advice, isRestored: false }],
+              };
+            });
             break;
           case "plan_step_updated":
             onPlanStepUpdatedRef.current?.(event.stepIndex, event.newStatus);
             break;
-          case "paused":
-            setIsCoachingPaused(true);
+          case "mode_changed":
+            utils.session.get.setData({ id: sessionId }, (prev) =>
+              prev ? { ...prev, mode: event.mode } : prev,
+            );
             break;
-          case "resumed":
-            setIsCoachingPaused(false);
+          case "stopped": {
+            // 「stopped を受信したらループ終端」という契約を client 側でも担保する。
+            // backend で endSession() が DB エラーで失敗したケースでも、
+            // SSE で stopped を受信した時点で UI を終端状態にする。
+            // setData のみで invalidate しないのは、refetch すると endedAt: null に
+            // 巻き戻ってしまうため（DB 失敗時のセーフティネットを潰さない）。
+            // ISO 文字列は formatDate(new Date(...)) でも正しく解釈される。
+            utils.session.get.setData({ id: sessionId }, (prev) => {
+              if (!prev) return prev;
+              if (prev.session.endedAt !== null && prev.session.endedAt !== undefined) {
+                return prev;
+              }
+              return {
+                ...prev,
+                session: { ...prev.session, endedAt: new Date().toISOString() },
+              };
+            });
             break;
-          case "stopped":
-            setIsCoachingStopped(true);
-            break;
+          }
         }
       },
     },
   );
-
-  const latestAdvice = adviceHistory.findLast((a) => !a.isRestored) ?? null;
-
-  return { adviceHistory, latestAdvice, isCoachingStopped, isCoachingPaused };
 }

@@ -95,6 +95,8 @@ const { loopFinished, submitMessage } = startCoachLoop({
   plan,
   skillManifest,
   previousAdvices: [],
+  // CLI には自動ループ切替 UI が無いため、従来通り auto モードで起動して後方互換を保つ。
+  initialMode: "auto",
 });
 
 rl.on("line", (line) => {

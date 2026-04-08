@@ -1,6 +1,6 @@
 # @dcc/core リーディングガイド
 
-> 最終更新: 2026-04-04
+> 最終更新: 2026-04-08
 
 ## このパッケージの役割
 
@@ -12,13 +12,14 @@
 
 ```text
 ① index.ts          — 何がexportされているか全体像を把握
-② coach-loop.ts     — 最重要。ループ全体のフロー、一時停止・再開、MessageBox
-③ prompts.ts        — AIへの指示の全容（rootエージェントのシステムプロンプト）
-④ engine.ts         — Claude SDK呼出の仕組み、onToolUse、セッション継続
-⑤ agents.ts         — サブエージェント（researcher）の定義
-⑥ skills.ts         — スキルファイル収集、ツール権限ガード、Bashバリデーション
-⑦ planner.ts        — プラン生成（セットアップ時のみ使用）
-⑧ capture.ts + diff.ts — スクリーンキャプチャと差分検出
+② loop-types.ts     — LoopMode / RoundTrigger / UserMessage の集約。coach-loop と prompts が共有
+③ coach-loop.ts     — 最重要。manual/auto 二モード、NextRoundGate、ModeController、MessageBox
+④ prompts.ts        — AIへの指示の全容（trigger ベースの分岐）
+⑤ engine.ts         — Claude SDK呼出の仕組み、onToolUse、セッション継続
+⑥ agents.ts         — サブエージェント（researcher）の定義
+⑦ skills.ts         — スキルファイル収集、ツール権限ガード、Bashバリデーション
+⑧ planner.ts        — プラン生成（セットアップ時のみ使用）
+⑨ capture.ts + diff.ts — スクリーンキャプチャと差分検出
 ```
 
 残り（config, list-displays, paths, output, gemini）は必要になったときに読めばよい。
@@ -30,9 +31,10 @@ packages/core/src/
 ├── index.ts            ← バレルexport（全公開APIの窓口）
 │
 │ ── コーチングループ ──
-├── coach-loop.ts       ← [最重要] コーチングの心臓部。一時停止・再開・メッセージ受信を含む
+├── coach-loop.ts       ← [最重要] コーチングの心臓部。manual/auto モード切替・「次へ進む」要求・メッセージ受信
+├── loop-types.ts       ← LoopMode / RoundTrigger / UserMessage（coach-loop と prompts の共有型）
 ├── engine.ts           ← Claude Agent SDK ラッパー。onToolUseコールバック対応
-├── prompts.ts          ← rootエージェントのシステム/ユーザープロンプト構築
+├── prompts.ts          ← rootエージェントのシステム/ユーザープロンプト構築（trigger 軸で分岐）
 ├── agents.ts           ← サブエージェント定義（researcher のみ実質稼働）
 ├── skills.ts           ← スキルファイルパス収集・ツール権限ガード・Bashコマンド検証
 │
@@ -71,22 +73,24 @@ root エージェント（= advisor）
 
 ### 1ラウンドの流れ（executeOneRound）
 
+`executeOneRound` は `RoundTrigger`（initial / timer / user_message / manual_next）を引数に取り、trigger に応じて diff スキップとプロンプト分岐を行う。
+
 ```mermaid
 flowchart TD
-    A["executeOneRound()"] --> B["captureScreen()"]
+    A["executeOneRound(state, trigger)"] --> B["captureScreen()"]
     B -->|失敗| C["onEvent: capture_failed → 次ラウンドへ"]
-    B -->|成功| D{"初回 or ユーザーメッセージあり？"}
+    B -->|成功| D{"shouldBypassDiffCheck(trigger)?<br/>= initial / user_message / manual_next"}
 
     D -->|Yes| F["saveScreenshot()"]
-    D -->|No| E["checkScreenDiff()"]
+    D -->|No (= timer)| E["checkScreenDiff()"]
     E -->|変化なし| G["onEvent: no_change → 次ラウンドへ"]
     E -->|変化あり| F
 
     F --> H["onEvent: querying"]
-    H --> I["invokeClaude()\n+ onToolUse でツール実行を検証"]
+    H --> I["invokeClaude()<br/>buildCoachUserPrompt は trigger 軸で分岐<br/>+ onToolUse でツール実行を検証"]
     I -->|失敗| J["onEvent: engine_error → 次ラウンドへ"]
     I -->|成功| K["checkSessionContinuity()"]
-    K -->|途切れた| L["onEvent: session_lost\nsessionId リセット"]
+    K -->|途切れた| L["onEvent: session_lost<br/>sessionId リセット"]
     K -->|OK| M["parseAdvice()"]
     M -->|__SILENT__| N["onEvent: silent"]
     M -->|テキスト| O["onEvent: advice"]
@@ -98,58 +102,105 @@ flowchart TD
 
 ### メインループの全体構造（startCoachLoop）
 
-`executeOneRound` を繰り返すメインループには、5つのウェイクトリガーがある。
+`waitForNextTrigger()` が次に実行すべきラウンドの `RoundInput`（trigger + userMessage）を決定し、`executeOneRound` に渡す。trigger が無いケース（mode_changed や spurious wake）では `null` を返してループ先頭に戻り再判定する。
 
 ```mermaid
 flowchart TD
-    Start["startCoachLoop()"] --> Init["LoopState 初期化\npreviousImage: null\nsessionId: undefined\nroundIndex: 0"]
-    Init --> PauseCheck["awaitUnpause()\n一時停止中なら待機"]
+    Start["startCoachLoop()<br/>initialMode: manual or auto"] --> Init["LoopState 初期化<br/>previousImage: null<br/>sessionId: undefined<br/>roundIndex: 0"]
+    Init --> NextTrig["waitForNextTrigger()<br/>次の RoundInput を決定"]
 
-    PauseCheck --> Round["executeOneRound()"]
-    Round --> Wait["waitForNextRound()\n5つのトリガーで待機"]
+    NextTrig -->|"trigger != null"| Round["executeOneRound(trigger)"]
+    NextTrig -->|"null (mode_changed や abort)"| Init2["再判定"]
+    Init2 --> NextTrig
 
-    Wait -->|"① タイマー満了"| PauseCheck
-    Wait -->|"② abort"| End["cleanupTemp() → 終了"]
-    Wait -->|"③ メッセージ到着"| PauseCheck
-    Wait -->|"④ pause"| PauseCheck
-    Wait -->|"⑤ resume"| PauseCheck
+    Round --> NextTrig
+
+    NextTrig -->|"abort"| End["cleanupTemp() → 終了"]
 
     style Start fill:#e1f5fe
-    style Wait fill:#f3e5f5
+    style NextTrig fill:#f3e5f5
     style End fill:#ffebee
 ```
 
-### 一時停止・再開の仕組み（PauseControl + awaitUnpause）
+`waitForNextTrigger()` の優先順位:
+
+1. `messageBox.consume()` で保留メッセージがあれば → `trigger: "user_message"`
+2. `nextRoundGate.consumePending()` で「次へ進む」要求があれば → `trigger: "manual_next"`
+3. **初回かつ auto モード**なら → `trigger: "initial"`（即時実行）
+4. それ以外 → `waitForNextRound()` で待機（auto は timer も含む / manual は timer 無し）
+
+### LoopMode と「次へ進む」: manual / auto 二モード制
+
+セッションは `manual`（デフォルト）と `auto` の 2 モードを持つ。manual は「ユーザーが次へ進むを押した時だけ 1 ラウンド実行」、auto は「intervalSeconds 毎に自動実行 + 次へ進む補助 CTA」。
+
+```mermaid
+stateDiagram-v2
+    [*] --> Manual
+    Manual --> Manual: requestNextRound() → 1 ラウンド実行
+    Manual --> Auto: setMode("auto")<br/>(内部で nextRoundGate.request() も発火)
+    Auto --> Auto: timer 満了 → 1 ラウンド実行
+    Auto --> Auto: requestNextRound() → 即時 1 ラウンド
+    Auto --> Manual: setMode("manual")<br/>(進行中 timer は cancel される)
+    Manual --> [*]: abort
+    Auto --> [*]: abort
+```
+
+manual モード初回は `state.previousImage === null` のまま wait に落ち、`requestNextRound` / `submitMessage` / `setMode("auto")` 以外では絶対に走らない。「初回ラウンドが勝手に走る退行」を構造的に防ぐ。
+
+### 「次へ進む」専用チャンネル: NextRoundGate
+
+`NextRoundGate` は `pending: boolean` 単一フラグの状態機械で、連打 dedupe を型レベルで保証する。messageBox とは完全に独立した経路で動く。
+
+```mermaid
+sequenceDiagram
+    participant UI as MessageInput<br/>(次へ進むボタン)
+    participant API as session.requestNextRound
+    participant CS as coach-session.ts
+    participant Gate as NextRoundGate
+    participant Loop as メインループ
+
+    UI->>API: requestNextRound({ sessionId })
+    API->>CS: requestNextRound(sessionId)
+    CS->>Gate: request()
+    Note over Gate: pending = true<br/>(既に true なら no-op = dedupe)
+    Gate-->>Loop: waitForNextRound を中断
+
+    Loop->>Gate: consumePending() → true
+    Note over Gate: pending = false
+    Loop->>Loop: makeNextRoundTrigger()<br/>= manual_next
+    Loop->>Loop: executeOneRound(manual_next)
+
+    Note over UI,Loop: ラウンド実行中に何度押しても<br/>pending は 1 枚のまま<br/>= 連打しても次の 1 ラウンドだけ実行
+```
+
+「`messageBox` には書き込まれない」のがポイント。advice 履歴に偽のユーザー発話が混入しないし、prompt には `manual_next` trigger 経由で「ユーザーが明示的に次を要求している」というメタ情報のみが伝わる。
+
+### auto/manual 切替の race 対策: ModeController
+
+auto モードで `waitForNextRound` が `setTimeout` を待っている最中に manual に切り替えると、放置すれば timer 満了で 1 ラウンド余計に走ってしまう。これを防ぐため、`ModeController.onChange` を `waitForNextRound` の wake 要因に組み込んでいる。
 
 ```mermaid
 sequenceDiagram
     participant UI as ダッシュボード
-    participant Server as coach-session.ts
-    participant Loop as メインループ
-    participant PC as PauseControl
-    participant MB as MessageBox
+    participant CS as coach-session.ts
+    participant MC as ModeController
+    participant Loop as waitForNextRound
 
-    UI->>Server: pause(sessionId)
-    Server->>Loop: loop.pause()
-    Loop->>PC: pause()
-    Note over PC: paused = true
-    Loop-->>UI: SSE: { kind: "paused" }
+    Note over Loop: auto モード中、timer (60s) を仕掛けて待機
 
-    Note over Loop: awaitUnpause() で待機中...
-    Note over Loop: 3つの起床トリガー:
-    Note over Loop: ① resume() が呼ばれる
-    Note over Loop: ② abort される
-    Note over Loop: ③ メッセージが届く（→ 自動再開）
+    UI->>CS: setMode({ mode: "manual" })
+    CS->>MC: set("manual")
+    MC->>MC: current = "manual"
+    MC-->>Loop: onChange() callback
 
-    UI->>Server: resume(sessionId)
-    Server->>Loop: loop.resume()
-    Loop->>PC: resume()
-    Note over PC: paused = false
-    Loop-->>UI: SSE: { kind: "resumed" }
-    Note over Loop: awaitUnpause() 解決 → ループ再開
+    Note over Loop: wakeUp("mode_changed")
+    Loop->>Loop: cleanup() → clearTimeout(timer)
+    Loop-->>CS: 戻り値 reason="mode_changed"
+
+    Note over CS: メインループ先頭に戻り<br/>新 mode で再判定<br/>= manual なので timer 仕掛けず wait
 ```
 
-**ポイント**: 一時停止中にユーザーメッセージが届くと自動的に再開する（案A）。
+`setMode("auto")` の場合は逆に「即時 1 ラウンド実行」が UX 上自然なので、`setMode` の中で `nextRoundGate.request()` を内部から呼ぶ。これにより auto に切替えた瞬間にすぐ 1 ラウンド回る。
 
 ### MessageBox パターン
 
@@ -242,13 +293,12 @@ graph LR
         engine_error
         session_lost
         plan_step_updated
-        paused
-        resumed
+        mode_changed["mode_changed (LoopMode)"]
         stopped
     end
 ```
 
-> `started` と `stopped` は LoopEvent の union に含まれるが、**core 内では発火されない**。`stopped` は server 側の `coach-session.ts` が `loopFinished` Promise 解決後に EventBus へ publish する。`paused` は `startCoachLoop` の返り値ハンドルの `pause()` 経由で発火する。`resumed` はハンドルの `resume()` に加え、一時停止中にメッセージが届いた際に `awaitUnpause()` 内部からも発火する。
+> `started` と `stopped` は LoopEvent の union に含まれるが、**core 内では発火されない**。`stopped` は server 側の `coach-session.ts` が `loopFinished` Promise の `.then`/`.catch` 両方で EventBus へ publish する。「成功/失敗問わずループが終端した」というセマンティクスを backend が保証する契約。`mode_changed` は `setMode` ハンドル呼び出し時に同値でなければ発火する。
 
 | イベント | 意味 | UIでの表示 |
 |---------|------|-----------|
@@ -256,9 +306,10 @@ graph LR
 | `engine_error` | Claude呼出失敗 | エラー表示 |
 | `plan_step_updated` | プランステップ進捗更新 | 進捗バッジ変化 |
 | `user_message_received` | ユーザーからのメッセージ到着 | (内部フロー) |
-| `paused` | 一時停止 | 「一時停止中」バッジ |
-| `resumed` | 再開 | 「コーチング中」バッジに戻る |
-| `stopped` | ループ終了 (**server側で発火**) | 「終了」バッジ |
+| `mode_changed` | manual/auto 切替 | 「手動」/「自動」バッジ + Switch 状態 |
+| `stopped` | ループ終了 (**server側で発火**、成功/失敗問わず) | 「終了」バッジ |
+
+> 旧仕様との差分: かつて存在した `paused` / `resumed` イベントは廃止された。manual / auto の 2 状態制に統一されており、pause という独立した状態は存在しない。「自動ループを停止したい」場合は `setMode("manual")` を使う。
 
 ---
 
@@ -275,20 +326,34 @@ graph LR
 - YouTube動画の検索・要約フロー手順
 - 復元されたアドバイス履歴（`previousAdvices`）
 
-`buildCoachUserPrompt()` は状況に応じて3パターンに分岐する。
+`buildCoachUserPrompt()` は `RoundTrigger` を主軸に switch 分岐する。各 trigger の中で初回ラウンド（`isFirstRound`）かどうかを内部で扱う。
 
 ```mermaid
 flowchart TD
-    A["buildCoachUserPrompt()"] --> B{初回？}
-    B -->|Yes| C["「最初のスクリーンショットです」"]
-    B -->|No| D{ユーザーメッセージあり？}
-    D -->|Yes| E["メッセージ本文 + 添付画像パス"]
-    D -->|No| F["「前回から画面に変化がありました」"]
+    A["buildCoachUserPrompt(input)"] --> SW{"switch (input.trigger)"}
 
-    C --> G["+ スクリーンショットパス\n+ リファレンス画像パス（複数）\n+ プランステップ一覧"]
-    E --> G
-    F --> G
+    SW -->|initial| INIT["buildInitialPrompt<br/>「最初のスクリーンショットです」<br/>(auto モード初回専用)"]
+    SW -->|manual_next| MN{"isFirstRound?"}
+    SW -->|user_message| UM{"isFirstRound?"}
+    SW -->|timer| TM["「前回から画面に変化がありました」"]
+
+    MN -->|Yes| MN1["「最初のスクリーンショットです」<br/>+ 「次へ進むで最初のアドバイスを<br/>手動要求」"]
+    MN -->|No| MN2["「次へ進むで次のアドバイスを<br/>手動要求」<br/>(__SILENT__ は完璧時のみ可)"]
+
+    UM -->|Yes| UM1["初回プロンプト + メッセージ追記"]
+    UM -->|No| UM2["「ユーザーからメッセージがあります」<br/>+ メッセージ本文"]
+
+    INIT --> G["+ スクリーンショットパス<br/>+ リファレンス画像パス<br/>+ プランステップ一覧"]
+    MN1 --> G
+    MN2 --> G
+    UM1 --> G
+    UM2 --> G
+    TM --> G
 ```
+
+**設計判断**: `isFirstRound` と `trigger` を **直交した次元**として扱う。同じ「初回ラウンド」でも、起動契機（auto モードの自動初回 / ユーザーメッセージ / 「次へ進む」）によって AI に伝えるべき文脈が違うため、trigger を主軸に switch する。
+
+`manual_next` は **偽の発話を入れない**のがポイント。「やりました、次の指示をもらえますか？」のような架空のユーザー発話を作るのではなく、「ユーザーが次へ進むボタンで次のアドバイスを手動で要求しました」というメタ情報を伝える。advice 履歴も汚染されない。
 
 ---
 
@@ -533,13 +598,15 @@ flowchart LR
 
 ```ts
 type CoachLoopHandle = {
-  readonly loopFinished: Promise<void>;       // ループ終了を待つ
+  readonly loopFinished: Promise<void>;            // ループ終了を待つ
   readonly submitMessage: (msg: UserMessage) => void;  // メッセージ送信
-  readonly pause: () => void;                 // 一時停止
-  readonly resume: () => void;                // 再開
-  readonly isPaused: () => boolean;           // 一時停止中か
+  readonly getMode: () => LoopMode;                // 現在のモード取得
+  readonly setMode: (mode: LoopMode) => void;      // モード切替（同値なら no-op）
+  readonly requestNextRound: () => void;           // 「次へ進む」要求（連打は dedupe）
 };
 ```
+
+旧仕様の `pause` / `resume` / `isPaused` は **削除済み**。`setMode("manual")` で「自動ループを止める」という意味になる。
 
 ---
 
@@ -550,10 +617,12 @@ coach-loop.ts 内で定義されている非公開の構造:
 | 関数/型 | 役割 |
 |---------|------|
 | `createMessageBox()` | メッセージのキューイングとループの即時起床 |
-| `createPauseControl()` | 一時停止フラグとコールバック管理 |
-| `waitForNextRound()` | 5トリガー（timer/abort/message/pause/resume）の統一待機 |
-| `awaitUnpause()` | pause 中の専用待機（resume/abort/message で解決） |
+| `createNextRoundGate()` | 「次へ進む」専用チャンネル。pending: boolean 単一フラグで連打 dedupe |
+| `createModeController()` | manual/auto モード状態と onChange コールバック管理 |
+| `waitForNextRound()` | 5トリガー（timer/abort/message/next_round/mode_changed）の統一待機。timer は auto モード時のみ仕掛かる |
+| `waitForNextTrigger()` | 次に実行すべき RoundInput（trigger + userMessage）を決定 |
 | `executeOneRound()` | 1ラウンド分の処理（キャプチャ→diff→AI→結果解析） |
+| `shouldBypassDiffCheck()` | trigger ごとに diff チェックを skip するか判定 |
 | `checkScreenDiff()` | diff 結果を DiffCheckResult に変換 |
 | `deriveNextState()` | 次ラウンド用の LoopState を導出（不変更新） |
 | `handleToolUse()` | onToolUse コールバック。Bash/Write の安全チェック |

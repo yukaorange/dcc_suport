@@ -2,6 +2,7 @@ import {
   type CoachConfig,
   type CoachLoopHandle,
   type LoopEvent,
+  type LoopMode,
   loadSkillManifest,
   type Plan,
   type RestoredAdvice,
@@ -34,17 +35,17 @@ type SubmitMessageResult =
   | { readonly isOk: true }
   | { readonly isOk: false; readonly reason: string };
 
-type PauseResult = { readonly isOk: true } | { readonly isOk: false; readonly reason: string };
+type ModeResult = { readonly isOk: true } | { readonly isOk: false; readonly reason: string };
 
 type CoachSessionHandle = {
   readonly getActiveSessionId: () => string | null;
   readonly isSessionActive: (sessionId: string) => boolean;
-  readonly isSessionPaused: (sessionId: string) => boolean;
+  readonly getMode: (sessionId: string) => LoopMode | null;
   readonly start: (options: StartOptions) => Promise<void>;
   readonly stop: () => void;
   readonly submitMessage: (sessionId: string, message: UserMessage) => SubmitMessageResult;
-  readonly pause: (sessionId: string) => PauseResult;
-  readonly resume: (sessionId: string) => PauseResult;
+  readonly setMode: (sessionId: string, mode: LoopMode) => ModeResult;
+  readonly requestNextRound: (sessionId: string) => ModeResult;
 };
 
 export type { CoachSessionHandle, StartOptions };
@@ -125,28 +126,46 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
         plan: options.plan,
         skillManifest,
         previousAdvices: options.previousAdvices ?? [],
+        // 新規/復元ともに manual から開始。auto への切替はユーザー操作に委ねる。
+        initialMode: "manual",
       });
 
       activeState = { sessionId: options.sessionId, loop, abortController };
       log.info("coach loop started");
 
       const mySessionId = options.sessionId;
+      // 「stopped は成功/失敗問わず必ず流す」契約を保証するためのヘルパー。
+      // endSession() は同期 DB 更新で throw し得るので try/catch で包み、
+      // DB エラーがあっても stopped 配信を必ず実行する。
+      // RULE-004 例外: coach-session は server 側のエントリポイント層であり、
+      // ここで try/catch を吸収しないと終端契約が守れない。
+      const finalizeSession = (): void => {
+        try {
+          endSession(deps.db, mySessionId);
+        } catch (e) {
+          log.failed(`endSession failed session=${mySessionId}: ${String(e)}`);
+        }
+      };
+
       loop.loopFinished
         .then(() => {
           log.info(`loop finished normally session=${mySessionId}`);
+          finalizeSession();
           deps.eventBus.publish({ kind: "stopped", sessionId: mySessionId });
         })
         .catch((err: unknown) => {
           log.failed(`loop crashed session=${mySessionId}: ${String(err)}`);
+          finalizeSession();
           deps.eventBus.publish({
             kind: "engine_error",
             message: String(err),
             sessionId: mySessionId,
           });
+          // クラッシュ終了時も「ループ終端」セマンティクスを保証するため stopped を発火。
+          deps.eventBus.publish({ kind: "stopped", sessionId: mySessionId });
         })
         .finally(() => {
           log.info(`ending session=${mySessionId}`);
-          endSession(deps.db, mySessionId);
           if (activeState?.sessionId === mySessionId) {
             activeState = null;
           }
@@ -169,25 +188,25 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
       return { isOk: true };
     },
 
-    pause: (sessionId) => {
+    getMode: (sessionId) => {
+      if (activeState === null || activeState.sessionId !== sessionId) return null;
+      return activeState.loop.getMode();
+    },
+
+    setMode: (sessionId, mode) => {
       if (activeState === null || activeState.sessionId !== sessionId) {
         return { isOk: false, reason: "アクティブなセッションが見つかりません" };
       }
-      activeState.loop.pause();
+      activeState.loop.setMode(mode);
       return { isOk: true };
     },
 
-    resume: (sessionId) => {
+    requestNextRound: (sessionId) => {
       if (activeState === null || activeState.sessionId !== sessionId) {
         return { isOk: false, reason: "アクティブなセッションが見つかりません" };
       }
-      activeState.loop.resume();
+      activeState.loop.requestNextRound();
       return { isOk: true };
-    },
-
-    isSessionPaused: (sessionId) => {
-      if (activeState === null || activeState.sessionId !== sessionId) return false;
-      return activeState.loop.isPaused();
     },
 
     stop: () => {

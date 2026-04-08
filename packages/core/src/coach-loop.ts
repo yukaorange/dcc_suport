@@ -5,6 +5,7 @@ import { type CapturedImage, captureScreen } from "./capture";
 import type { CoachConfig } from "./config";
 import { computeDiff } from "./diff";
 import { checkSessionContinuity, type EngineResult, invokeClaude } from "./engine";
+import type { LoopMode, RoundTrigger, UserMessage } from "./loop-types";
 import { COACH_TEMP_DIR, SKILLS_ROOT } from "./paths";
 import type { Plan, PlanStepStatus } from "./planner";
 import { buildCoachSystemPrompt, buildCoachUserPrompt, type RestoredAdvice } from "./prompts";
@@ -47,11 +48,6 @@ function handleToolUse(toolName: string, input: Record<string, unknown>): void {
   }
 }
 
-type UserMessage = {
-  readonly text: string;
-  readonly imagePaths: readonly string[];
-};
-
 export type { UserMessage };
 
 type CoachAdvice = {
@@ -76,8 +72,7 @@ type LoopEvent =
       readonly stepIndex: number;
       readonly newStatus: PlanStepStatus;
     }
-  | { readonly kind: "paused" }
-  | { readonly kind: "resumed" }
+  | { readonly kind: "mode_changed"; readonly mode: LoopMode }
   | { readonly kind: "stopped" };
 
 export type { LoopEvent, CoachAdvice };
@@ -114,42 +109,76 @@ function createMessageBox(): MessageBox {
   };
 }
 
-type PauseControl = {
-  readonly pause: () => void;
-  readonly resume: () => void;
-  readonly isPaused: () => boolean;
-  readonly onPause: (cb: () => void) => void;
-  readonly onResume: (cb: () => void) => void;
-  readonly offPause: () => void;
-  readonly offResume: () => void;
+// 「次へ進む」専用のチャンネル。messageBox とは別経路で、
+// pending: boolean の単一フラグで連打 dedupe を型レベル保証する。
+type NextRoundGate = {
+  readonly request: () => void;
+  readonly consumePending: () => boolean;
+  readonly hasPending: () => boolean;
+  readonly awaitRequest: (signal: AbortSignal) => Promise<void>;
+  readonly cancelAwait: () => void;
 };
 
-function createPauseControl(): PauseControl {
-  let paused = false;
-  let pauseCb: (() => void) | null = null;
-  let resumeCb: (() => void) | null = null;
+function createNextRoundGate(): NextRoundGate {
+  let pending = false;
+  let wakeResolve: (() => void) | null = null;
 
   return {
-    pause: () => {
-      paused = true;
-      pauseCb?.();
+    request: () => {
+      if (pending) return;
+      pending = true;
+      wakeResolve?.();
+      wakeResolve = null;
     },
-    resume: () => {
-      paused = false;
-      resumeCb?.();
+    consumePending: () => {
+      if (!pending) return false;
+      pending = false;
+      return true;
     },
-    isPaused: () => paused,
-    onPause: (cb) => {
-      pauseCb = cb;
+    hasPending: () => pending,
+    awaitRequest: (signal) =>
+      new Promise<void>((resolve) => {
+        if (pending || signal.aborted) {
+          resolve();
+          return;
+        }
+        wakeResolve = () => {
+          resolve();
+        };
+      }),
+    cancelAwait: () => {
+      wakeResolve = null;
     },
-    onResume: (cb) => {
-      resumeCb = cb;
+  };
+}
+
+// auto/manual の切替と、auto モード中の timer wakeup を仲介するコントローラ。
+// onChange を waitForNextRound の wake 要因に含めることで、
+// auto → manual 切替時の race を防ぐ。
+type ModeController = {
+  readonly get: () => LoopMode;
+  readonly set: (mode: LoopMode) => boolean;
+  readonly onChange: (cb: () => void) => void;
+  readonly offChange: () => void;
+};
+
+function createModeController(initial: LoopMode): ModeController {
+  let current: LoopMode = initial;
+  let changeCb: (() => void) | null = null;
+
+  return {
+    get: () => current,
+    set: (mode) => {
+      if (current === mode) return false;
+      current = mode;
+      changeCb?.();
+      return true;
     },
-    offPause: () => {
-      pauseCb = null;
+    onChange: (cb) => {
+      changeCb = cb;
     },
-    offResume: () => {
-      resumeCb = null;
+    offChange: () => {
+      changeCb = null;
     },
   };
 }
@@ -163,14 +192,15 @@ type CoachLoopOptions = {
   readonly plan: Plan | null;
   readonly skillManifest: string | null;
   readonly previousAdvices: readonly RestoredAdvice[];
+  readonly initialMode?: LoopMode;
 };
 
 type CoachLoopHandle = {
   readonly loopFinished: Promise<void>;
   readonly submitMessage: (message: UserMessage) => void;
-  readonly pause: () => void;
-  readonly resume: () => void;
-  readonly isPaused: () => boolean;
+  readonly getMode: () => LoopMode;
+  readonly setMode: (mode: LoopMode) => void;
+  readonly requestNextRound: () => void;
 };
 
 export type { CoachLoopOptions, CoachLoopHandle };
@@ -225,6 +255,18 @@ function checkScreenDiff(
   return { shouldInvoke: true };
 }
 
+// trigger ごとに diff チェックをスキップすべきか判定する
+function shouldBypassDiffCheck(trigger: RoundTrigger): boolean {
+  switch (trigger) {
+    case "user_message":
+    case "manual_next":
+    case "initial":
+      return true;
+    case "timer":
+      return false;
+  }
+}
+
 function parseAdvice(result: string): string | null {
   const trimmed = result.trim();
   if (trimmed === SILENT_MARKER) return null;
@@ -232,7 +274,6 @@ function parseAdvice(result: string): string | null {
 }
 
 function deriveNextState(
-  //次のラウンドへ導く
   current: LoopState,
   newImage: CapturedImage,
   engineResult: EngineResult | null,
@@ -263,19 +304,20 @@ async function cleanupTemp(): Promise<void> {
   await unlink(SCREENSHOT_PATH).catch(() => {});
 }
 
-type WakeReason = "timer" | "abort" | "message" | "pause" | "resume";
+type WakeReason = "timer" | "abort" | "message" | "next_round" | "mode_changed";
 
-// 次のラウンドまで待機する。5つのトリガーのうち最初に起きたもので返る:
-//   ① タイマー満了 ② abort ③ メッセージ ④ pause ⑤ resume
+// 次のラウンドまで待機する。auto モードでは timer/abort/message/next_round/mode_changed、
+// manual モードでは timer 以外で wake する。
 function waitForNextRound(
-  durationMs: number,
+  intervalMs: number,
   signal: AbortSignal,
   messageBox: MessageBox,
-  pauseControl: PauseControl,
+  nextRoundGate: NextRoundGate,
+  modeController: ModeController,
 ): Promise<WakeReason> {
-  if (messageBox.hasMessages()) return Promise.resolve("message");
   if (signal.aborted) return Promise.resolve("abort");
-  if (pauseControl.isPaused()) return Promise.resolve("pause");
+  if (messageBox.hasMessages()) return Promise.resolve("message");
+  if (nextRoundGate.hasPending()) return Promise.resolve("next_round");
 
   return new Promise((resolve) => {
     let settled = false;
@@ -287,29 +329,40 @@ function waitForNextRound(
       resolve(reason);
     };
 
-    const timer = setTimeout(() => wakeUp("timer"), durationMs);
+    // manual モードでは timer を仕掛けない
+    const timer =
+      modeController.get() === "auto" ? setTimeout(() => wakeUp("timer"), intervalMs) : null;
+
     const onAbort = () => wakeUp("abort");
     signal.addEventListener("abort", onAbort, { once: true });
+
     messageBox.awaitMessage().then(() => wakeUp("message"));
-    pauseControl.onPause(() => wakeUp("pause"));
-    pauseControl.onResume(() => wakeUp("resume"));
+    nextRoundGate.awaitRequest(signal).then(() => {
+      if (nextRoundGate.hasPending()) wakeUp("next_round");
+    });
+    modeController.onChange(() => wakeUp("mode_changed"));
 
     const cleanup = () => {
-      clearTimeout(timer);
+      if (timer !== null) clearTimeout(timer);
       signal.removeEventListener("abort", onAbort);
       messageBox.cancelAwait();
-      pauseControl.offPause();
-      pauseControl.offResume();
+      nextRoundGate.cancelAwait();
+      modeController.offChange();
     };
   });
 }
+
+type RoundInput = {
+  readonly trigger: RoundTrigger;
+  readonly userMessage: UserMessage | null;
+};
 
 // 1ラウンド分の処理を実行し、次のラウンド用の LoopState を返す。
 // 異常系は早期リターンで抜け、正常系だけが最後まで到達する構造。
 //
 //   ① ユーザーメッセージがあれば通知
 //   ② 画面キャプチャ → 失敗なら return
-//   ③ 前回画像との diff 判定 → 変化なしなら return（初回・ユーザーメッセージ時はスキップ）
+//   ③ trigger に応じて diff 判定（manual_next/user_message/initial はスキップ）
 //   ④ スクリーンショットを一時ファイルに保存
 //   ⑤ AI に問い合わせ → エラーなら return
 //   ⑥ セッション継続確認 → 途切れたら sessionId リセットして return
@@ -317,12 +370,12 @@ function waitForNextRound(
 async function executeOneRound(
   state: LoopState,
   options: CoachLoopOptions,
-  userMessage: UserMessage | null,
+  input: RoundInput,
 ): Promise<LoopState> {
   const { config, onEvent } = options;
 
-  if (userMessage !== null) {
-    onEvent({ kind: "user_message_received", message: userMessage.text });
+  if (input.trigger === "user_message" && input.userMessage !== null) {
+    onEvent({ kind: "user_message_received", message: input.userMessage.text });
   }
 
   // @throws — OS レベルのキャプチャ失敗
@@ -339,9 +392,9 @@ async function executeOneRound(
   }
 
   const currentImage = captureResult.image;
-  const hasUserMessage = userMessage !== null;
+  const shouldBypassDiff = shouldBypassDiffCheck(input.trigger);
 
-  if (state.previousImage !== null && !hasUserMessage) {
+  if (state.previousImage !== null && !shouldBypassDiff) {
     const diffCheckResult = checkScreenDiff(currentImage, state.previousImage, config);
     if (!diffCheckResult.shouldInvoke) {
       onEvent(diffCheckResult.event);
@@ -360,7 +413,8 @@ async function executeOneRound(
     prompt: buildCoachUserPrompt({
       screenshotPath,
       isFirstRound,
-      userMessage,
+      trigger: input.trigger,
+      userMessage: input.userMessage,
       referenceImages: options.referenceImages,
       plan: state.plan,
     }),
@@ -422,66 +476,80 @@ async function executeOneRound(
 
 export function startCoachLoop(options: CoachLoopOptions): CoachLoopHandle {
   const messageBox = createMessageBox();
-  const pauseControl = createPauseControl();
+  const nextRoundGate = createNextRoundGate();
+  const modeController = createModeController(options.initialMode ?? "manual");
 
-  // pause 中は resume / abort / message のいずれかで抜ける専用待機
-  async function awaitUnpause(): Promise<void> {
-    if (!pauseControl.isPaused()) return;
+  let state: LoopState = {
+    previousImage: null,
+    sessionId: undefined,
+    roundIndex: 0,
+    plan: options.plan,
+  };
 
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const wake = () => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        resolve();
-      };
+  // 次に実行すべきラウンドの trigger を決定する。
+  // null を返した場合はループ先頭に戻って再判定する（mode_changed や spurious wake のケース）。
+  async function waitForNextTrigger(): Promise<RoundInput | null> {
+    // 1) 保留中メッセージは常に最優先
+    const queuedMessage = messageBox.consume();
+    if (queuedMessage !== null) {
+      return { trigger: "user_message", userMessage: queuedMessage };
+    }
 
-      const onAbort = () => wake();
-      options.signal.addEventListener("abort", onAbort, { once: true });
-      pauseControl.onResume(() => wake());
-      messageBox.awaitMessage().then(() => {
-        pauseControl.resume();
-        options.onEvent({ kind: "resumed" });
-        wake();
-      });
+    // 2) 保留中の next_round 要求
+    if (nextRoundGate.consumePending()) {
+      return makeNextRoundTrigger();
+    }
 
-      const cleanup = () => {
-        options.signal.removeEventListener("abort", onAbort);
-        messageBox.cancelAwait();
-        pauseControl.offResume();
-      };
-    });
+    // 3) 初回ラウンド: auto モードのみ即時実行、manual モードはゼロから待機
+    if (state.previousImage === null && modeController.get() === "auto") {
+      return { trigger: "initial", userMessage: null };
+    }
+
+    // 4) 待機
+    const reason = await waitForNextRound(
+      options.config.intervalSeconds * 1000,
+      options.signal,
+      messageBox,
+      nextRoundGate,
+      modeController,
+    );
+
+    switch (reason) {
+      case "abort":
+        return null;
+      case "timer":
+        return { trigger: "timer", userMessage: null };
+      case "message": {
+        const msg = messageBox.consume();
+        if (msg === null) return null;
+        return { trigger: "user_message", userMessage: msg };
+      }
+      case "next_round": {
+        if (!nextRoundGate.consumePending()) return null;
+        return makeNextRoundTrigger();
+      }
+      case "mode_changed":
+        return null;
+    }
+  }
+
+  function makeNextRoundTrigger(): RoundInput {
+    // 初回ラウンドであっても trigger は manual_next のまま渡す。
+    // 「初回キャプチャか」(state.previousImage === null) と「起動契機」(trigger) は
+    // 直交した概念として扱い、prompts.ts 側で manual_next の初回ケースを別途扱う。
+    return { trigger: "manual_next", userMessage: null };
   }
 
   const loopFinished = (async () => {
     await ensureTempDir();
 
-    let state: LoopState = {
-      previousImage: null,
-      sessionId: undefined,
-      roundIndex: 0,
-      plan: options.plan,
-    };
-
     try {
       while (!options.signal.aborted) {
-        await awaitUnpause();
+        const input = await waitForNextTrigger();
         if (options.signal.aborted) break;
+        if (input === null) continue;
 
-        const userMessage = messageBox.consume();
-        state = await executeOneRound(state, options, userMessage);
-
-        if (options.signal.aborted) break;
-        const reason = await waitForNextRound(
-          options.config.intervalSeconds * 1000,
-          options.signal,
-          messageBox,
-          pauseControl,
-        );
-        if (reason === "pause") {
-          console.log("[loop] paused by user");
-        }
+        state = await executeOneRound(state, options, input);
       }
     } finally {
       await cleanupTemp();
@@ -491,18 +559,16 @@ export function startCoachLoop(options: CoachLoopOptions): CoachLoopHandle {
   return {
     loopFinished,
     submitMessage: messageBox.submit,
-    pause: () => {
-      if (!pauseControl.isPaused()) {
-        pauseControl.pause();
-        options.onEvent({ kind: "paused" });
+    getMode: modeController.get,
+    setMode: (mode) => {
+      const changed = modeController.set(mode);
+      if (!changed) return;
+      options.onEvent({ kind: "mode_changed", mode });
+      // manual → auto 遷移時は即時 1 ラウンド回す（UX 統一）
+      if (mode === "auto") {
+        nextRoundGate.request();
       }
     },
-    resume: () => {
-      if (pauseControl.isPaused()) {
-        pauseControl.resume();
-        options.onEvent({ kind: "resumed" });
-      }
-    },
-    isPaused: pauseControl.isPaused,
+    requestNextRound: nextRoundGate.request,
   };
 }

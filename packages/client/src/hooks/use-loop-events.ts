@@ -6,6 +6,9 @@ type UseLoopEventsArgs = {
   readonly sessionId: string;
   readonly isEnabled: boolean;
   readonly onPlanStepUpdated?: (stepIndex: number, newStatus: PlanStepStatus) => void;
+  // ラウンド実行中かどうかを上位 state に同期するためのコールバック。
+  // querying で true、ラウンド終了系イベント（advice/silent/engine_error 等）で false。
+  readonly onRoundActivity?: (isPending: boolean) => void;
 };
 
 // SSE 購読の副作用フック。state を持たず、すべての更新は
@@ -15,11 +18,14 @@ export function useLoopEvents({
   sessionId,
   isEnabled,
   onPlanStepUpdated,
+  onRoundActivity,
 }: UseLoopEventsArgs): void {
   const utils = trpc.useUtils();
   const onPlanStepUpdatedRef = useRef(onPlanStepUpdated);
+  const onRoundActivityRef = useRef(onRoundActivity);
   useEffect(() => {
     onPlanStepUpdatedRef.current = onPlanStepUpdated;
+    onRoundActivityRef.current = onRoundActivity;
   });
 
   trpc.events.subscribe.useSubscription(
@@ -28,6 +34,9 @@ export function useLoopEvents({
       enabled: isEnabled,
       onData: (event) => {
         switch (event.kind) {
+          case "querying":
+            onRoundActivityRef.current?.(true);
+            break;
           case "advice":
             utils.session.get.setData({ id: sessionId }, (prev) => {
               if (!prev) return prev;
@@ -36,6 +45,16 @@ export function useLoopEvents({
                 advices: [...prev.advices, { ...event.advice, isRestored: false }],
               };
             });
+            onRoundActivityRef.current?.(false);
+            break;
+          case "silent":
+          case "engine_error":
+          case "no_change":
+          case "diff_skipped":
+          case "session_lost":
+          case "capture_failed":
+            // ラウンドが何らかの理由で終了したケース。advice 以外でもローディング解除。
+            onRoundActivityRef.current?.(false);
             break;
           case "plan_step_updated":
             onPlanStepUpdatedRef.current?.(event.stepIndex, event.newStatus);
@@ -62,6 +81,8 @@ export function useLoopEvents({
                 session: { ...prev.session, endedAt: new Date().toISOString() },
               };
             });
+            // 終端時にローディングが残らないようにクリア
+            onRoundActivityRef.current?.(false);
             break;
           }
         }

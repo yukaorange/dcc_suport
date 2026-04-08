@@ -471,6 +471,46 @@ describe("LoopMode", () => {
     expect(events.filter((e) => e.kind === "mode_changed")).toHaveLength(0);
   });
 
+  test("autoモード2ラウンド目以降は画面差分が閾値未満ならinvokeClaudeをスキップする", async () => {
+    captureScreen.mockReset();
+    invokeClaude.mockReset();
+    captureScreen.mockResolvedValue({ isOk: true, image: FAKE_IMAGE });
+    invokeClaude.mockResolvedValue({
+      isOk: true,
+      result: "first round advice",
+      sessionId: "x",
+      rawMessages: [],
+    });
+    checkSessionContinuity.mockReturnValue({ continuable: true });
+
+    const events: LoopEvent[] = [];
+    const abortController = new AbortController();
+    let noChangeCount = 0;
+    const handle = startCoachLoop({
+      config: { ...defaultConfig, intervalSeconds: 0 },
+      signal: abortController.signal,
+      onEvent: (e) => {
+        events.push(e);
+        // 1 ラウンド目で advice が出た後、2 ラウンド目で no_change が出るのを待ってから abort
+        if (e.kind === "no_change") {
+          noChangeCount++;
+          if (noChangeCount === 1) abortController.abort();
+        }
+      },
+      referenceImages: [],
+      plan: null,
+      skillManifest: null,
+      previousAdvices: [],
+      initialMode: "auto",
+    });
+
+    await handle.loopFinished;
+    // 1 ラウンド目のみ invokeClaude が呼ばれ、2 ラウンド目以降は no_change でスキップされる
+    expect(invokeClaude).toHaveBeenCalledTimes(1);
+    expect(events.some((e) => e.kind === "advice")).toBe(true);
+    expect(events.some((e) => e.kind === "no_change")).toBe(true);
+  });
+
   test("manual→auto切替時はmode_changedの後に即時1ラウンド回る", async () => {
     captureScreen.mockReset();
     invokeClaude.mockReset();

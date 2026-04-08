@@ -1,7 +1,7 @@
 import type { LoopMode, PlanStepStatus } from "@dcc/core";
 import type { AppRouter } from "@dcc/server/trpc";
 import type { inferRouterOutputs } from "@trpc/server";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -39,7 +39,17 @@ function CoachingFeed({
   const isCoachingStopped = data.session.endedAt !== null && data.session.endedAt !== undefined;
   const mode: LoopMode = data.mode ?? "manual";
 
-  useLoopEvents({ sessionId, isEnabled: !isCoachingStopped, onPlanStepUpdated });
+  // 「次へ進む」押下からラウンド完了までのローディング表示用 state。
+  // SSE の querying で立ち、advice/silent/engine_error 等で落ちる。
+  // クリック直後の即時反応のため、MessageInput からも setter を叩ける。
+  const [isRoundPending, setIsRoundPending] = useState(false);
+
+  useLoopEvents({
+    sessionId,
+    isEnabled: !isCoachingStopped,
+    onPlanStepUpdated,
+    onRoundActivity: setIsRoundPending,
+  });
 
   const utils = trpc.useUtils();
   const setModeMutation = trpc.session.setMode.useMutation({
@@ -101,7 +111,14 @@ function CoachingFeed({
         <LatestAdvice content={latestAdvice.content} roundIndex={latestAdvice.roundIndex} />
       )}
 
-      {!isCoachingStopped && <MessageInput sessionId={sessionId} mode={mode} />}
+      {!isCoachingStopped && (
+        <MessageInput
+          sessionId={sessionId}
+          mode={mode}
+          isRoundPending={isRoundPending}
+          onRoundPendingChange={setIsRoundPending}
+        />
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">{children}</div>

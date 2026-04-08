@@ -30,6 +30,19 @@ const createContext = (): AppContext => ({ db, eventBus, config, coachSession, p
 
 const app = createApp({ createContext });
 
-Bun.serve({ port: PORT, fetch: app.fetch, idleTimeout: 255 });
+// SSE subscription request は長寿命 stream のため、Bun の idleTimeout で
+// mid-response 切断されないように個別に timeout 無効化する。
+// 参考: https://bun.sh/docs/api/http#server-timeout-request-seconds
+Bun.serve({
+  port: PORT,
+  idleTimeout: 255,
+  fetch(req, server) {
+    const url = new URL(req.url);
+    if (url.pathname === "/api/trpc/events.subscribe") {
+      server.timeout(req, 0);
+    }
+    return app.fetch(req);
+  },
+});
 
 console.log(`DCC Coach server started at http://localhost:${PORT}`);

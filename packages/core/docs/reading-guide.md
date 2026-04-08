@@ -363,6 +363,109 @@ flowchart TD
   → OK
 ```
 
+### ③ パス契約: `skills/` 仮想ルートと resolveSkillPath
+
+スキルファイルの書き込みは「**`skills/` という単語が必ず `SKILLS_ROOT`（= `packages/core/skills`）の別名を指す**」という仮想ルート契約で統一されている。これは過去の事故対策として導入された設計。
+
+#### なぜ仮想ルートが必要だったか
+
+歴史的な経緯として、3者（LLM・manifest 表示・権限ガード）が同じ `skills/` という単語を**バラバラの意味**で使っていたことで、`skills/ 外への書き込みを検出` エラーが頻発していた。
+
+```mermaid
+flowchart LR
+    subgraph 修正前["修正前: 契約が三重に食い違う"]
+        L1["LLM<br/>「skills/ に書く」<br/>→仮想ルート的解釈"]
+        M1["manifest<br/>relative(cwd, path)<br/>→cwd依存表示"]
+        G1["ガード<br/>resolve(path)<br/>→cwd起点で解決"]
+        L1 -.誤解.-> X1["💥 不一致 throw"]
+        M1 -.誤解.-> X1
+        G1 -.誤解.-> X1
+    end
+
+    subgraph 修正後["修正後: 全員が同じ仮想ルートを共有"]
+        L2["LLM<br/>「skills/foo.md」"]
+        M2["manifest<br/>「skills/foo.md」"]
+        G2["ガード<br/>resolveSkillPath()"]
+        ROOT["SKILLS_ROOT<br/>= packages/core/skills"]
+        L2 --> ROOT
+        M2 --> ROOT
+        G2 --> ROOT
+    end
+```
+
+#### 事故の流れ（修正前の挙動）
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Server as サーバー<br/>(cwd: packages/server)
+    participant LLM as コーチLLM
+    participant Guard as handleToolUse
+    participant FS as ファイルシステム
+
+    Server->>LLM: プロンプト「skills/tools/<app>/ に書け」
+    LLM->>Guard: Write(file_path: "skills/tools/illustrator/x.md")
+    Note over Guard: resolve("skills/tools/...")<br/>= process.cwd() 起点で解決
+    Guard->>Guard: → /Users/.../packages/server/skills/tools/illustrator/x.md
+    Note over Guard: SKILLS_ROOT (= packages/core/skills)<br/>の prefix と不一致
+    Guard-->>LLM: ❌ throw "skills/ 外への書き込みを検出"
+    Note over FS: 一部のファイルは<br/>packages/server/skills/<br/>に誤って残留
+```
+
+「LLM が思っている skills の場所」と「ガードが認める skills の場所」が、サーバーの cwd を介して食い違っていたのが本質。
+
+#### resolveSkillPath の解決フロー（修正後）
+
+`skills.ts` の `resolveSkillPath(filePath)` がパス契約の中核。3つの分岐で「LLM の意図」を `SKILLS_ROOT` 配下に着地させる:
+
+```mermaid
+flowchart TD
+    Start(["filePath 入力"]) --> Abs{"絶対パス?"}
+
+    Abs -->|"Yes"| InRoot{"SKILLS_ROOT<br/>配下?"}
+    InRoot -->|"Yes"| ReturnAbs["そのまま返す"]
+    InRoot -->|"No"| HasMarker{"パスに /skills/<br/>を含む?"}
+    HasMarker -->|"Yes"| Remap["最後の /skills/ 以降を切り取り<br/>SKILLS_ROOT に再マップ<br/>★cwd取り違え救済★"]
+    HasMarker -->|"No"| ReturnAbsRaw["そのまま返す<br/>(後段で deny される)"]
+
+    Abs -->|"No (相対)"| Virtual{"skills/ で<br/>始まる?"}
+    Virtual -->|"Yes"| Resolve1["SKILLS_ROOT 起点で解決<br/>★メインルート★"]
+    Virtual -->|"No"| Resolve2["process.cwd() 起点で解決<br/>(後段で SKILLS_ROOT 配下チェック)"]
+
+    Remap --> Final(["解決済みパス"])
+    Resolve1 --> Final
+    Resolve2 --> Final
+    ReturnAbs --> Final
+    ReturnAbsRaw --> Final
+
+    style Resolve1 fill:#d4f4dd
+    style Remap fill:#fff4d4
+```
+
+#### 「再マップ」の救済処理
+
+LLM がプロンプト指示を無視して絶対パスを構築してきた場合の補正。サーバーの cwd を取り違えた絶対パスを自動で正しい場所に着地させる。
+
+```mermaid
+flowchart LR
+    A["LLM が誤って構築:<br/>/Users/.../packages/server/skills/<br/>tools/illustrator/x.md"]
+    A -->|"/skills/ 以降を切り取り"| B["tools/illustrator/x.md"]
+    B -->|"SKILLS_ROOT に貼り直し"| C["/Users/.../packages/core/skills/<br/>tools/illustrator/x.md ✅"]
+
+    style A fill:#ffd4d4
+    style C fill:#d4f4dd
+```
+
+#### 契約を守る3つの仕組み
+
+| レイヤー | 役割 | 実装箇所 |
+|---|---|---|
+| プロンプト | 「Write の file_path は必ず `skills/` 仮想パス」と明示 | `prompts.ts` のステップ4 |
+| manifest | `relative(SKILLS_ROOT, ...)` で `skills/...` 形式に統一 | `skills.ts:formatManifest` |
+| ガード | `resolveSkillPath()` で `skills/` を SKILLS_ROOT 基準に解決 | `skills.ts` + `coach-loop.ts:handleToolUse` |
+
+これら3つが揃うことで、サーバーの cwd がどこであろうが、LLM がどう書こうが、最終的に `SKILLS_ROOT` 配下にしか書き込めない契約が成立する。
+
 ---
 
 ## planner.ts: プラン生成

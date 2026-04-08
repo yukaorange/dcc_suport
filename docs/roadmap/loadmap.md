@@ -645,6 +645,7 @@ dcc_suport/
 | pixelmatchThreshold | 0-1 | 0.1 | ピクセル色差感度 |
 | notification | terminal/os/both | terminal | 通知方法 |
 | claude.mcpConfigPath | — | — | MCP設定ファイルパス（省略可） |
+
 ```
 
 ---

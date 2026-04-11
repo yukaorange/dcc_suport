@@ -12,7 +12,7 @@ import { buildCoachSystemPrompt, buildCoachUserPrompt, type RestoredAdvice } fro
 import { createToolPermissionGuard, resolveSkillPath, validateBashCommand } from "./skills";
 
 const ADVISOR_MAX_TURNS = 20;
-const ADVISOR_TIMEOUT_MS = 600_000;
+const ADVISOR_TIMEOUT_MS = 1_800_000;
 
 const TOOL_LOG_MESSAGES: Record<string, string> = {
   WebSearch: "[coach] YouTube動画を検索しています...",
@@ -31,6 +31,15 @@ function handleToolUse(toolName: string, input: Record<string, unknown>): void {
       const command = input.command;
       if (typeof command !== "string" || !validateBashCommand(command).isValid) {
         throw new Error(`[coach] 不正なBashコマンドを検出。セッションを中断: ${command}`);
+      }
+      // extract-video は run_in_background で実行すべき。同期だと Bash の 10 分制約に引っかかる。
+      // throw はしない（同期でも 3 定数 30 分化のフォールバックが効く可能性があるため）。
+      const isExtractVideoCommand = command.includes("extract-video");
+      const isSynchronousExecution = input.run_in_background !== true;
+      if (isExtractVideoCommand && isSynchronousExecution) {
+        console.warn(
+          "[coach] 警告: extract-video.ts が同期実行されました。run_in_background: true を推奨します。",
+        );
       }
       break;
     }
@@ -426,8 +435,8 @@ async function executeOneRound(
       previousAdvices: options.previousAdvices,
     }),
     agents: buildAgentDefinitions(),
-    tools: ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob"],
-    allowedTools: ["Read", "Agent", "Bash", "WebSearch", "Write"],
+    tools: ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob", "TaskOutput"],
+    allowedTools: ["Read", "Agent", "Bash", "WebSearch", "Write", "TaskOutput"],
     canUseTool: createToolPermissionGuard(),
     onToolUse: handleToolUse,
     maxTurns: ADVISOR_MAX_TURNS,

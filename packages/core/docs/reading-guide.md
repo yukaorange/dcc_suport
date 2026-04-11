@@ -1,6 +1,6 @@
 # @dcc/core リーディングガイド
 
-> 最終更新: 2026-04-08
+> 最終更新: 2026-04-11
 
 ## このパッケージの役割
 
@@ -240,10 +240,10 @@ type UserMessage = {
 `invokeClaude()` に渡す権限設定は3層構造になっている。
 
 ```text
-tools:        ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob"]
+tools:        ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob", "TaskOutput"]
                 ↑ セッション全体で「存在を認識する」ツール一覧
 
-allowedTools: ["Read", "Agent", "Bash", "WebSearch", "Write"]
+allowedTools: ["Read", "Agent", "Bash", "WebSearch", "Write", "TaskOutput"]
                 ↑ root が自動承認で使えるツール（canUseTool をスキップする）
 
 canUseTool:   createToolPermissionGuard()
@@ -269,7 +269,7 @@ flowchart LR
 
 `handleToolUse` のチェック内容:
 
-- **Bash**: `validateBashCommand()` で `bun run extract-video.ts <youtube-url>` のみ許可
+- **Bash**: `validateBashCommand()` で `bun run extract-video.ts <youtube-url>` のみ許可。加えて、extract-video が `run_in_background: true` なしで同期実行された場合は警告ログを出力
 - **Write**: `skills/` ディレクトリ配下のみ許可
 - その他: ログ出力のみ
 
@@ -412,7 +412,7 @@ flowchart TD
     B -->|"Read / Glob"| C["skills/ または docs/ 配下のみ許可"]
     B -->|"Write"| D["skills/ 配下のみ許可"]
     B -->|"Bash"| E["validateBashCommand()\nbun run extract-video.ts のみ許可"]
-    B -->|"WebSearch / WebFetch"| F["常に許可"]
+    B -->|"WebSearch / WebFetch / TaskOutput"| F["常に許可"]
     B -->|"その他"| G["拒否"]
 ```
 
@@ -625,4 +625,4 @@ coach-loop.ts 内で定義されている非公開の構造:
 | `shouldBypassDiffCheck()` | trigger ごとに diff チェックを skip するか判定 |
 | `checkScreenDiff()` | diff 結果を DiffCheckResult に変換 |
 | `deriveNextState()` | 次ラウンド用の LoopState を導出（不変更新） |
-| `handleToolUse()` | onToolUse コールバック。Bash/Write の安全チェック |
+| `handleToolUse()` | onToolUse コールバック。Bash/Write の安全チェック + extract-video 同期実行の警告 |

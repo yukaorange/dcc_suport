@@ -1,6 +1,6 @@
 # @dcc/server リーディングガイド
 
-> 最終更新: 2026-04-08
+> 最終更新: 2026-04-11
 
 ## このパッケージの役割
 
@@ -221,7 +221,7 @@ flowchart LR
 
 > **注意**: `stopped` イベントは core の coach-loop が発火するのではなく、server の `coach-session.ts` が `loopFinished` Promise の `.then` / `.catch` 両方で EventBus へ publish する。「成功/失敗問わずループが終端した」というセマンティクスを backend が保証する契約。`.catch` 経路では `engine_error` の後に `stopped` も流す。
 >
-> **順序が重要**: `stopped` を publish する**前**に `endSession()` を呼んで DB の `endedAt` を埋める。client が `stopped` 受信時に `session.get` を invalidate（再取得）しても `endedAt` が NULL のまま返らないようにするため。
+> **順序が重要**: `stopped` を publish する**前**に `finalizeSession()` ヘルパー（`endSession()` を `try/catch` で保護）を呼んで DB の `endedAt` を埋める。DB エラーが発生しても `stopped` 配信は止まらない。ただし DB エラー時は `endedAt` が NULL のまま残るため、client 側では `stopped` 受信時に **invalidate ではなく `setData` で `endedAt` を直接埋める** セーフティネット設計を採用している（`use-loop-events.ts` 参照）。
 
 **読むべきファイル**: `lib/coach-session.ts`（イベントハンドラ部分）→ `pure/event-bus.ts` → `trpc/routers/events.ts`
 
@@ -321,10 +321,10 @@ stateDiagram-v2
 ```mermaid
 flowchart TD
     LF["loop.loopFinished"]
-    LF -->|".then (正常終了)"| OK1["endSession(db, sessionId)"]
+    LF -->|".then (正常終了)"| OK1["finalizeSession()<br/>(endSession を try/catch で保護)"]
     OK1 --> OK2["publish 'stopped'"]
 
-    LF -->|".catch (例外)"| NG1["endSession(db, sessionId)"]
+    LF -->|".catch (例外)"| NG1["finalizeSession()<br/>(endSession を try/catch で保護)"]
     NG1 --> NG2["publish 'engine_error'"]
     NG2 --> NG3["publish 'stopped'<br/>(成功/失敗問わず終端を保証)"]
 
@@ -332,7 +332,7 @@ flowchart TD
     NG3 --> Final
 ```
 
-`.catch` 経路でも `stopped` を流すことで、client は「`stopped` を見ればループが終端した」と単一ルールで扱える。`engine_error` を別途特別扱いする必要がない。
+`finalizeSession()` は `endSession()` を `try/catch` で包むヘルパー。DB エラーが発生しても `stopped` 配信が止まらないことを保証する。`.catch` 経路でも `stopped` を流すことで、client は「`stopped` を見ればループが終端した」と単一ルールで扱える。
 
 ## 読む順番の推奨
 

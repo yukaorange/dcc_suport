@@ -1,6 +1,6 @@
 # アーキテクチャ概要
 
-更新日: 2026-04-09
+更新日: 2026-04-11
 
 ## 全体フロー（Web UI 主導 / DCC-37 以降）
 
@@ -342,7 +342,7 @@ sequenceDiagram
 
 ### sendMessage（ユーザー発話）の経路
 
-これとは別に、ユーザーが Textarea からテキストを送信する `sendMessage` は従来通り `messageBox` 経由で `user_message` trigger としてループを起こす。`user_message_received` イベントが発火し、advice 履歴とは別レーンで「あなたの発話」として記録される。
+これとは別に、ユーザーが Textarea からテキストを送信する `sendMessage` は従来通り `messageBox` 経由で `user_message` trigger としてループを起こす。`user_message_received` イベントが発火するが、このイベントは SSE で配信されるだけで **DB 永続化や client 側での特別表示はされない**（永続化されるのは `advice` イベントのみ）。
 
 ```mermaid
 sequenceDiagram
@@ -440,7 +440,7 @@ abort 経路:
 - 同セッションを再度 `coachSession.start()` した場合、前のループを `abortController.abort()` で停止してから新規起動
 - 明示的な `coachSession.stop()` で全終了
 
-`loopFinished` Promise の `.then` / `.catch` 両方で `endSession()` → `publish('stopped')` を実行する契約。これにより **成功/失敗いずれも client 側に終端を通知** する。`endSession()` は try/catch でガードされ、DB エラーで stopped 配信が止まらないようになっている。
+`loopFinished` Promise の `.then` / `.catch` 両方で `finalizeSession()` → `publish('stopped')` を実行する契約。`finalizeSession()` は `endSession()` を `try/catch` で保護するヘルパーで、DB エラーが起きても `stopped` 配信が止まらない。`.catch` 経路では `engine_error` を publish した後に `stopped` も publish する（成功/失敗問わず終端を保証）。
 
 #### CLI 版（@dcc/cli）
 
@@ -472,10 +472,10 @@ Claude Agent SDK では、AI は「ツール」を通じてテキスト生成以
 
 ```mermaid
 flowchart TD
-    subgraph assembly ["組み立て（coach-loop.ts L260-281）"]
+    subgraph assembly ["組み立て（coach-loop.ts）"]
         direction LR
         A1["agents:<br>buildAgentDefinitions()"]
-        A2["tools: 'Agent'"]
+        A2["tools / allowedTools"]
         A3["canUseTool:<br>createToolPermissionGuard()"]
     end
 
@@ -485,11 +485,11 @@ flowchart TD
     SDK --> Parent
 
     subgraph runtime ["SDK 内部の実行時構造"]
-        Parent["親エージェント<br>───────────<br>使えるツール: Agent のみ<br>（＝サブエージェントを呼ぶだけ）"]
+        Parent["親エージェント（root）<br>───────────<br>allowedTools: Read, Agent, Bash,<br>WebSearch, Write, TaskOutput<br>（自動承認で直接使える）"]
 
         Parent -->|"方向性判断が必要"| Advisor["advisor<br>───────────<br>tools: なし（対話のみ）<br>方向性・美的判断<br>GUI操作案内<br>進捗評価"]
 
-        Parent -->|"調査が必要"| Researcher["researcher<br>───────────<br>tools: WebSearch, WebFetch,<br>Read, Write, Bash, Glob<br>（canUseTool の検問あり）"]
+        Parent -->|"調査が必要"| Researcher["researcher<br>───────────<br>tools: Read, Write, Glob<br>（canUseTool の検問あり）"]
     end
 
     style assembly fill:#f5f5f5,stroke:#bdbdbd
@@ -514,17 +514,17 @@ flowchart LR
     subgraph agents_prop ["agents（誰を呼べるか）"]
         Def["buildAgentDefinitions()<br>agents.ts"]
         Def --> Advisor2["advisor<br>tools: なし"]
-        Def --> Researcher2["researcher<br>tools: Read,Write,<br>Bash,Glob,<br>WebSearch,WebFetch"]
+        Def --> Researcher2["researcher<br>tools: Read, Write, Glob"]
     end
 
     subgraph tools_prop ["tools（セッション全体のツール一覧）"]
-        Tools2["tools: Agent, Read, Write,<br>Bash, Glob, WebSearch, WebFetch<br>coach-loop.ts"]
+        Tools2["tools: Agent, Read, Write,<br>Bash, Glob, WebSearch,<br>WebFetch, TaskOutput<br>coach-loop.ts"]
         Tools2 --> Menu["ここに含まれないツールは<br>サブエージェントにも渡されない"]
     end
 
     subgraph allowed_prop ["allowedTools（親が直接使えるツール）"]
-        Allowed["allowedTools: Read, Agent<br>coach-loop.ts"]
-        Allowed --> Restrict["advisor 自身は Read と<br>Agent のみ使用可能"]
+        Allowed["allowedTools: Read, Agent,<br>Bash, WebSearch, Write, TaskOutput<br>coach-loop.ts"]
+        Allowed --> Restrict["親（root）が自動承認で<br>直接使えるツール"]
     end
 
     subgraph canuse_prop ["canUseTool（使い方が安全か）"]
@@ -545,14 +545,14 @@ flowchart LR
 | `allowedTools` | 親エージェントのみ | `tools` のうち、親が自動承認で直接使えるものを制限する |
 
 ```
-tools: ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob"]
+tools: ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob", "TaskOutput"]
                  ↑ セッション全体のメニュー（全員が見える）
 
-allowedTools: ["Read", "Agent"]
-                 ↑ advisor が自分で注文できるもの（advisor の制限）
+allowedTools: ["Read", "Agent", "Bash", "WebSearch", "Write", "TaskOutput"]
+                 ↑ 親（root）が自動承認で直接使えるもの
 ```
 
-**実例**: researcher が Bash で `extract-video.ts` を実行するには、parent の `tools` に `"Bash"` が含まれている必要がある。`allowedTools` に含まれていなくても、サブエージェントの agent 定義で `tools: ["Bash"]` と指定されていれば researcher は使える。
+**実例**: researcher が Write でスキルファイルに書き込むには、parent の `tools` に `"Write"` が含まれている必要がある。`allowedTools` に含まれていても、それは親が自動承認で使えるだけであり、サブエージェントの agent 定義で `tools: ["Write"]` と指定されていなければ researcher は使えない。
 
 ### 注意: createToolPermissionGuard() が実質 researcher にのみ影響する理由
 
@@ -562,10 +562,10 @@ allowedTools: ["Read", "Agent"]
 
 ```mermaid
 flowchart LR
-    subgraph parent ["親エージェント"]
-        PT["allowedTools: Read, Agent"]
-        PT --> PA["Agent ツールで<br>サブエージェントを呼ぶ"]
-        PA -.- PG["canUseTool?<br>→ Agent の実行に対しては<br>SDK が呼ばない"]
+    subgraph parent ["親エージェント（root）"]
+        PT["allowedTools: Read, Agent,<br>Bash, WebSearch, Write, TaskOutput"]
+        PT --> PA["allowedTools のツールを<br>自動承認で直接使える"]
+        PA -.- PG["canUseTool?<br>→ allowedTools に含まれるツールは<br>SDK がスキップする"]
     end
 
     subgraph advisor_box ["advisor"]
@@ -575,7 +575,7 @@ flowchart LR
     end
 
     subgraph researcher_box ["researcher"]
-        RT["tools: Read, Write,<br>Bash, Glob,<br>WebSearch, WebFetch"]
+        RT["tools: Read, Write, Glob"]
         RT --> RA["ツールを使うたびに<br>canUseTool が発火"]
         RA --> RG["createToolPermissionGuard()<br>が allow / deny を判定"]
     end
@@ -587,9 +587,9 @@ flowchart LR
 
 | エージェント | tools | canUseTool が発火するか | 理由 |
 |-------------|-------|----------------------|------|
-| 親 | `allowedTools: ["Read", "Agent"]` | しない | SDK は Agent ツール（サブエージェント呼び出し）に対して canUseTool を呼ばない |
+| 親（root） | `allowedTools: ["Read", "Agent", "Bash", "WebSearch", "Write", "TaskOutput"]` | しない | allowedTools に含まれるツールは SDK が canUseTool をスキップする |
 | advisor | なし | しない | ツールを一切持たないので、判定を受ける機会がない |
-| researcher | 6つ | **する** | Read / Write / Bash 等を使うたびに毎回判定される |
+| researcher | 3つ（Read, Write, Glob） | **する** | Read / Write / Glob を使うたびに毎回判定される |
 
 結果として、`createToolPermissionGuard()` 内の判定ロジック（skills/ 配下のみ書き込み可、Bash は extract-video.ts のみ等）は**事実上 researcher のためのルール**となっている。
 関数名を `createToolPermissionGuard` としているのは、これが SDK の `canUseTool` コールバックとして全体に登録される仕組みであることを正確に表すためである。
@@ -653,7 +653,7 @@ flowchart TD
     Structure -->|Yes| BA["allow ✅"]
     Structure -->|No| BD2["deny ❌"]
 
-    Switch -->|"WebSearch / WebFetch"| WEB["allow ✅<br>（無条件）"]
+    Switch -->|"WebSearch / WebFetch / TaskOutput"| WEB["allow ✅<br>（無条件）"]
 
     Switch -->|"その他（Edit等）"| DEFAULT["deny ❌<br>（未知のツールは全拒否）"]
 ```

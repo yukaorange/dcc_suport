@@ -25,7 +25,7 @@ type EngineFailure = {
 
 export type EngineResult = EngineSuccess | EngineFailure;
 
-const MAX_TIMEOUT_MS = 600_000;
+const MAX_TIMEOUT_MS = 1_800_000;
 
 type SandboxSettings = {
   enabled?: boolean;

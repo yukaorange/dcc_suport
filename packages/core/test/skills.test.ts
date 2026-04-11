@@ -249,6 +249,16 @@ describe("createToolPermissionGuard", () => {
     expect(result.behavior).toBe("allow");
   });
 
+  test("TaskOutputはallowされる", async () => {
+    const guard = createToolPermissionGuard();
+    const result = await guard(
+      "TaskOutput",
+      { task_id: "test-id", block: true, timeout: 1800000 },
+      GUARD_OPTIONS,
+    );
+    expect(result.behavior).toBe("allow");
+  });
+
   test("Read: file_pathもpathも未指定の場合denyされる", async () => {
     const guard = createToolPermissionGuard();
 

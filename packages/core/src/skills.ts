@@ -257,6 +257,7 @@ export function createToolPermissionGuard(): CanUseTool {
         return checkBashPermission(input);
       case "WebSearch":
       case "WebFetch":
+      case "TaskOutput":
         return ALLOW;
       default:
         return { behavior: "deny", message: `${toolName} is not allowed for researcher` };

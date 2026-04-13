@@ -326,7 +326,7 @@ graph LR
 - プランのステップ一覧
 - リファレンス画像の説明
 - YouTube動画の検索・要約フロー手順
-- 復元されたアドバイス履歴（`previousAdvices`、直近 5 件にトリミング。トークン消費削減のため）
+- 復元されたアドバイス履歴（`previousAdvices`、直近 20 件にトリミング。トークン消費削減のため）
 
 `buildCoachUserPrompt()` は `RoundTrigger` を主軸に switch 分岐する。各 trigger の中で初回ラウンド（`isFirstRound`）かどうかを内部で扱う。
 

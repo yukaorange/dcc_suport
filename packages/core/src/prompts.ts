@@ -178,9 +178,9 @@ ${sanitized}
   }
 
   if (input.previousAdvices.length > 0) {
-    // トークン消費を抑えるため直近 5 件のみ system prompt に含める。
-    // 414 件全件 → 5 件で推定 4 万トークン → 500 トークンに削減。
-    const recentAdvices = input.previousAdvices.slice(-5);
+    // トークン消費を抑えるため直近 20 件のみ system prompt に含める。
+    // 414 件全件 → 20 件で推定 4 万トークン → 1500 トークンに削減。
+    const recentAdvices = input.previousAdvices.slice(-20);
     const sanitizedHistory = recentAdvices
       .map((a, i) => {
         const safe = a.content

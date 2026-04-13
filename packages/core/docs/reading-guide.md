@@ -1,6 +1,6 @@
 # @dcc/core リーディングガイド
 
-> 最終更新: 2026-04-11
+> 最終更新: 2026-04-13
 
 ## このパッケージの役割
 
@@ -293,6 +293,7 @@ graph LR
         engine_error
         session_lost
         plan_step_updated
+        tool_activity["tool_activity (message)"]
         mode_changed["mode_changed (LoopMode)"]
         stopped
     end
@@ -306,6 +307,7 @@ graph LR
 | `engine_error` | Claude呼出失敗 | エラー表示 |
 | `plan_step_updated` | プランステップ進捗更新 | 進捗バッジ変化 |
 | `user_message_received` | ユーザーからのメッセージ到着 | (内部フロー) |
+| `tool_activity` | ツール実行中の途中経過メッセージ | ダッシュボードのローディング表示内に動的メッセージとして表示 |
 | `mode_changed` | manual/auto 切替 | 「手動」/「自動」バッジ + Switch 状態 |
 | `stopped` | ループ終了 (**server側で発火**、成功/失敗問わず) | 「終了」バッジ |
 
@@ -324,7 +326,7 @@ graph LR
 - プランのステップ一覧
 - リファレンス画像の説明
 - YouTube動画の検索・要約フロー手順
-- 復元されたアドバイス履歴（`previousAdvices`）
+- 復元されたアドバイス履歴（`previousAdvices`、直近 5 件にトリミング。トークン消費削減のため）
 
 `buildCoachUserPrompt()` は `RoundTrigger` を主軸に switch 分岐する。各 trigger の中で初回ラウンド（`isFirstRound`）かどうかを内部で扱う。
 
@@ -373,8 +375,10 @@ flowchart LR
 ```
 
 - `signal` (AbortSignal) でキャンセル可能
-- `onToolUse` コールバック: ツール実行を検知して `handleToolUse()` に中継
+- `onToolUse` コールバック: ツール実行を検知して `createHandleToolUse()` に中継
 - `checkSessionContinuity()`: セッション維持チェック（画面遷移検出用）
+- `effort` パラメータ: API 推論の労力レベル（`"low"` / `"medium"` / `"high"` / `"max"`）
+- `thinking` パラメータ: 適応的思考モード（`{ type: "adaptive" }` / `{ type: "disabled" }`）。coach-loop.ts は通常 `effort: "high"` + `thinking: { type: "disabled" }` を渡し、YouTube URL を含むユーザーメッセージの場合のみ `thinking: { type: "adaptive" }` に切り替える
 
 ---
 
@@ -625,4 +629,5 @@ coach-loop.ts 内で定義されている非公開の構造:
 | `shouldBypassDiffCheck()` | trigger ごとに diff チェックを skip するか判定 |
 | `checkScreenDiff()` | diff 結果を DiffCheckResult に変換 |
 | `deriveNextState()` | 次ラウンド用の LoopState を導出（不変更新） |
-| `handleToolUse()` | onToolUse コールバック。Bash/Write の安全チェック + extract-video 同期実行の警告 |
+| `describeToolActivity()` | ツール名と input からユーザー向けの進捗メッセージを動的に組み立てる |
+| `createHandleToolUse(onEvent)` | ツール実行時の安全チェック（Bash/Write）+ `tool_activity` イベント発火のクロージャ生成 |

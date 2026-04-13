@@ -117,6 +117,8 @@ export function MessageInput({
     setAttachedImages(attachedImages.filter((img) => img.id !== imageId));
   };
 
+  const pendingLabel = toolActivityMessage ?? "コーチが応答中...";
+
   // mode に応じて「次へ進む」ボタンの表現を切替（switch で網羅: RULE-006）
   const renderNextRoundButton = () => {
     switch (mode) {
@@ -132,7 +134,7 @@ export function MessageInput({
             {isRoundPending ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                {toolActivityMessage ?? "コーチが応答中..."}
+                {pendingLabel}
               </>
             ) : (
               <>
@@ -148,14 +150,8 @@ export function MessageInput({
             type="button"
             variant="outline"
             size="icon"
-            aria-label={
-              isRoundPending ? (toolActivityMessage ?? "コーチが応答中") : "次のラウンドを即実行"
-            }
-            title={
-              isRoundPending
-                ? (toolActivityMessage ?? "コーチが応答中...")
-                : "次のラウンドを即実行（タイマーを待たず実行）"
-            }
+            aria-label={isRoundPending ? pendingLabel : "次のラウンドを即実行"}
+            title={isRoundPending ? pendingLabel : "次のラウンドを即実行（タイマーを待たず実行）"}
             onClick={handleRequestNextRound}
             disabled={!canRequestNext}
             className="shrink-0 rounded-xl"

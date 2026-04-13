@@ -1,6 +1,6 @@
 # アーキテクチャ概要
 
-更新日: 2026-04-11
+更新日: 2026-04-13
 
 ## 全体フロー（Web UI 主導 / DCC-37 以降）
 
@@ -64,7 +64,7 @@ flowchart LR
     end
 
     subgraph core ["コアループ"]
-        coachLoop["coach-loop.ts<br>─────────────<br>startCoachLoop()<br>executeOneRound()<br>NextRoundGate / ModeController"]
+        coachLoop["coach-loop.ts<br>─────────────<br>startCoachLoop()<br>executeOneRound()<br>NextRoundGate / ModeController<br>describeToolActivity()<br>createHandleToolUse()"]
         loopTypes["loop-types.ts<br>─────────────<br>LoopMode<br>RoundTrigger<br>UserMessage"]
         capture["capture.ts<br>─────────────<br>captureScreen()"]
         diff["diff.ts<br>─────────────<br>computeDiff()"]
@@ -834,6 +834,7 @@ sequenceDiagram
 | `no_change` | coach-loop（diff 閾値未満） | ローディング解除のみ |
 | `querying` | coach-loop（AI 呼び出し直前） | 「次へ進む」ローディング表示開始 |
 | `mode_changed` | coach-loop（setMode 時） | キャッシュの `mode` を上書き、Switch 同期 |
+| `tool_activity` | coach-loop（ツール実行時） | `onToolActivity` 経由でダッシュボードのローディングメッセージを動的に更新 |
 | `plan_step_updated` | coach-loop / DB 経由 | プランステップの status 更新 |
 | `stopped` | coach-session（成功/失敗問わず） | `endedAt` を埋めて UI を終端状態に |
 | `user_message_received` | coach-loop（user_message trigger 時） | （現在は client 側で特別処理なし） |

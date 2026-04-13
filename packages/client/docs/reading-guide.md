@@ -1,6 +1,6 @@
 # @dcc/client リーディングガイド
 
-> 最終更新: 2026-04-11
+> 最終更新: 2026-04-13
 
 ## このパッケージの役割
 
@@ -106,7 +106,7 @@ flowchart LR
 
 ## SSE 購読フック: use-loop-events.ts
 
-クライアント側の心臓部。1 つのフックがコーチングループからのリアルタイムイベントをすべて受け取り、`trpc.session.get` の **クエリキャッシュを single source of truth として書き換える**。フック自体は state を持たない副作用フック。
+クライアント側の心臓部。1 つのフックがコーチングループからのリアルタイムイベントをすべて受け取り、`trpc.session.get` の **クエリキャッシュを single source of truth として書き換える**。フック自体は state を持たない副作用フック。コールバック経由で上位に通知する: `onPlanStepUpdated`（プランステップ進捗）、`onRoundActivity`（ラウンド実行状態）、`onToolActivity`（ツール実行中の途中経過メッセージ。`null` でクリア）。
 
 ### 設計原則: state を持たず、すべてキャッシュへ書き戻す
 
@@ -120,8 +120,9 @@ flowchart LR
     Switch -->|"mode_changed"| C2["cache.mode を上書き"]
     Switch -->|"stopped"| C3["cache.endedAt を埋める<br/>(invalidate しない)"]
     Switch -->|"plan_step_updated"| Cb["onPlanStepUpdated コールバック"]
-    Switch -->|"querying"| L1["onRoundActivity(true)"]
-    Switch -->|"advice / silent / engine_error /<br/>no_change / diff_skipped /<br/>session_lost / capture_failed / stopped"| L2["onRoundActivity(false)"]
+    Switch -->|"tool_activity"| TA["onToolActivity(event.message)"]
+    Switch -->|"querying"| L1["onRoundActivity(true)<br/>+ onToolActivity('AIに問い合わせ中...')"]
+    Switch -->|"advice / silent / engine_error /<br/>no_change / diff_skipped /<br/>session_lost / capture_failed / stopped"| L2["onRoundActivity(false)<br/>+ onToolActivity(null)"]
     C1 --> Cache["trpc.session.get の<br/>クエリキャッシュ"]
     C2 --> Cache
     C3 --> Cache
@@ -130,19 +131,20 @@ flowchart LR
 
 ### イベントごとの処理
 
-| event.kind | キャッシュ更新 | onRoundActivity |
-|---|---|---|
-| `advice` | `advices` に追加 | `false`（ラウンド完了） |
-| `silent` | なし | `false` |
-| `engine_error` | なし | `false` |
-| `no_change` | なし | `false`（diff スキップ） |
-| `diff_skipped` | なし | `false` |
-| `session_lost` | なし | `false` |
-| `capture_failed` | なし | `false` |
-| `querying` | なし | `true`（ラウンド開始） |
-| `plan_step_updated` | `onPlanStepUpdated` 経由で親が更新 | — |
-| `mode_changed` | `mode` を上書き | — |
-| `stopped` | `endedAt` を ISO 文字列で埋める（**invalidate しない**） | `false` |
+| event.kind | キャッシュ更新 | onRoundActivity | onToolActivity |
+|---|---|---|---|
+| `advice` | `advices` に追加 | `false`（ラウンド完了） | `null`（クリア） |
+| `silent` | なし | `false` | `null`（クリア） |
+| `engine_error` | なし | `false` | `null`（クリア） |
+| `no_change` | なし | `false`（diff スキップ） | `null`（クリア） |
+| `diff_skipped` | なし | `false` | `null`（クリア） |
+| `session_lost` | なし | `false` | `null`（クリア） |
+| `capture_failed` | なし | `false` | `null`（クリア） |
+| `querying` | なし | `true`（ラウンド開始） | `"AIに問い合わせ中..."` |
+| `tool_activity` | なし | — | `event.message`（動的メッセージ） |
+| `plan_step_updated` | `onPlanStepUpdated` 経由で親が更新 | — | — |
+| `mode_changed` | `mode` を上書き | — | — |
+| `stopped` | `endedAt` を ISO 文字列で埋める（**invalidate しない**） | `false` | `null`（クリア） |
 
 ### `stopped` で invalidate しない理由
 

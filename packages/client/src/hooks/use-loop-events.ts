@@ -9,6 +9,9 @@ type UseLoopEventsArgs = {
   // ラウンド実行中かどうかを上位 state に同期するためのコールバック。
   // querying で true、ラウンド終了系イベント（advice/silent/engine_error 等）で false。
   readonly onRoundActivity?: (isPending: boolean) => void;
+  // ツール実行中の途中経過メッセージ。tool_activity イベント経由で届く。
+  // null を渡すと進捗メッセージをクリアする意味。
+  readonly onToolActivity?: (message: string | null) => void;
 };
 
 // SSE 購読の副作用フック。state を持たず、すべての更新は
@@ -19,13 +22,16 @@ export function useLoopEvents({
   isEnabled,
   onPlanStepUpdated,
   onRoundActivity,
+  onToolActivity,
 }: UseLoopEventsArgs): void {
   const utils = trpc.useUtils();
   const onPlanStepUpdatedRef = useRef(onPlanStepUpdated);
   const onRoundActivityRef = useRef(onRoundActivity);
+  const onToolActivityRef = useRef(onToolActivity);
   useEffect(() => {
     onPlanStepUpdatedRef.current = onPlanStepUpdated;
     onRoundActivityRef.current = onRoundActivity;
+    onToolActivityRef.current = onToolActivity;
   });
 
   trpc.events.subscribe.useSubscription(
@@ -36,6 +42,10 @@ export function useLoopEvents({
         switch (event.kind) {
           case "querying":
             onRoundActivityRef.current?.(true);
+            onToolActivityRef.current?.("AIに問い合わせ中...");
+            break;
+          case "tool_activity":
+            onToolActivityRef.current?.(event.message);
             break;
           case "advice":
             utils.session.get.setData({ id: sessionId }, (prev) => {
@@ -46,6 +56,7 @@ export function useLoopEvents({
               };
             });
             onRoundActivityRef.current?.(false);
+            onToolActivityRef.current?.(null);
             break;
           case "silent":
           case "engine_error":
@@ -55,6 +66,7 @@ export function useLoopEvents({
           case "capture_failed":
             // ラウンドが何らかの理由で終了したケース。advice 以外でもローディング解除。
             onRoundActivityRef.current?.(false);
+            onToolActivityRef.current?.(null);
             break;
           case "plan_step_updated":
             onPlanStepUpdatedRef.current?.(event.stepIndex, event.newStatus);

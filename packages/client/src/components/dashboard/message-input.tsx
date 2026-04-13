@@ -20,6 +20,7 @@ type MessageInputProps = {
   // 「次へ進む」のローディング表示と多重押下抑止に使う。
   readonly isRoundPending: boolean;
   readonly onRoundPendingChange: (pending: boolean) => void;
+  readonly toolActivityMessage: string | null;
 };
 
 const MAX_ATTACHMENTS = 3;
@@ -29,6 +30,7 @@ export function MessageInput({
   mode,
   isRoundPending,
   onRoundPendingChange,
+  toolActivityMessage,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [attachedImages, setAttachedImages] = useState<readonly AttachedImage[]>([]);
@@ -130,7 +132,7 @@ export function MessageInput({
             {isRoundPending ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                コーチが応答中...
+                {toolActivityMessage ?? "コーチが応答中..."}
               </>
             ) : (
               <>
@@ -146,9 +148,13 @@ export function MessageInput({
             type="button"
             variant="outline"
             size="icon"
-            aria-label={isRoundPending ? "コーチが応答中" : "次のラウンドを即実行"}
+            aria-label={
+              isRoundPending ? (toolActivityMessage ?? "コーチが応答中") : "次のラウンドを即実行"
+            }
             title={
-              isRoundPending ? "コーチが応答中..." : "次のラウンドを即実行（タイマーを待たず実行）"
+              isRoundPending
+                ? (toolActivityMessage ?? "コーチが応答中...")
+                : "次のラウンドを即実行（タイマーを待たず実行）"
             }
             onClick={handleRequestNextRound}
             disabled={!canRequestNext}

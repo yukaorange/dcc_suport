@@ -210,7 +210,9 @@ function formatUserMessageBlock(userMessage: UserMessage): string {
 
   if (userMessage.imagePaths.length > 0) {
     const imageLines = userMessage.imagePaths.map((p, i) => `添付画像${i + 1}: ${p}`).join("\n");
-    parts.push(`${imageLines}\n上記の添付画像もReadツールで読み取って内容を確認してください。`);
+    parts.push(
+      `${imageLines}\n上記の添付画像の内容も踏まえて回答してください。画像はパスから自動的に認識されます。Readツールで開く必要はありません。`,
+    );
   }
 
   return parts.join("\n\n");

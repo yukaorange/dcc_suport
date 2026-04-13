@@ -43,12 +43,15 @@ function CoachingFeed({
   // SSE の querying で立ち、advice/silent/engine_error 等で落ちる。
   // クリック直後の即時反応のため、MessageInput からも setter を叩ける。
   const [isRoundPending, setIsRoundPending] = useState(false);
+  // ツール実行中の途中経過メッセージ。null = 進捗なし（通常表示に戻す）。
+  const [toolActivityMessage, setToolActivityMessage] = useState<string | null>(null);
 
   useLoopEvents({
     sessionId,
     isEnabled: !isCoachingStopped,
     onPlanStepUpdated,
     onRoundActivity: setIsRoundPending,
+    onToolActivity: setToolActivityMessage,
   });
 
   const utils = trpc.useUtils();
@@ -117,6 +120,7 @@ function CoachingFeed({
           mode={mode}
           isRoundPending={isRoundPending}
           onRoundPendingChange={setIsRoundPending}
+          toolActivityMessage={toolActivityMessage}
         />
       )}
 

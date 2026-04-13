@@ -14,47 +14,83 @@ import { createToolPermissionGuard, resolveSkillPath, validateBashCommand } from
 const ADVISOR_MAX_TURNS = 20;
 const ADVISOR_TIMEOUT_MS = 1_800_000;
 
-const TOOL_LOG_MESSAGES: Record<string, string> = {
-  WebSearch: "[coach] YouTube動画を検索しています...",
-  Bash: "[coach] 動画を要約しています。しばらくお待ちください...",
-  Write: "[coach] スキルファイルに知識を蓄積しています...",
-};
-
-// allowedTools は canUseTool をスキップするため、onToolUse で安全チェックを行う
-function handleToolUse(toolName: string, input: Record<string, unknown>): void {
-  if (toolName in TOOL_LOG_MESSAGES) {
-    console.log(TOOL_LOG_MESSAGES[toolName]);
-  }
-
+// ツール実行時にその目的を input から動的に組み立てて返す
+function describeToolActivity(toolName: string, input: Record<string, unknown>): string | null {
   switch (toolName) {
-    case "Bash": {
-      const command = input.command;
-      if (typeof command !== "string" || !validateBashCommand(command).isValid) {
-        throw new Error(`[coach] 不正なBashコマンドを検出。セッションを中断: ${command}`);
-      }
-      // extract-video は run_in_background で実行すべき。同期だと Bash の 10 分制約に引っかかる。
-      // throw はしない（同期でも 3 定数 30 分化のフォールバックが効く可能性があるため）。
-      const isExtractVideoCommand = command.includes("extract-video");
-      const isSynchronousExecution = input.run_in_background !== true;
-      if (isExtractVideoCommand && isSynchronousExecution) {
-        console.warn(
-          "[coach] 警告: extract-video.ts が同期実行されました。run_in_background: true を推奨します。",
-        );
-      }
-      break;
+    case "Read": {
+      const target = typeof input.file_path === "string" ? input.file_path : "ファイル";
+      return `${target} を読み取っています...`;
     }
     case "Write": {
-      const filePath = input.file_path;
-      if (typeof filePath === "string") {
-        const resolved = resolveSkillPath(filePath);
-        const skillsRoot = resolve(SKILLS_ROOT);
-        if (resolved !== skillsRoot && !resolved.startsWith(skillsRoot + sep)) {
-          throw new Error(`[coach] skills/ 外への書き込みを検出。セッションを中断: ${filePath}`);
-        }
-      }
-      break;
+      const target = typeof input.file_path === "string" ? input.file_path : "ファイル";
+      return `${target} に書き込んでいます...`;
+    }
+    case "WebSearch": {
+      const query = typeof input.query === "string" ? `「${input.query}」` : "";
+      return `${query} を検索しています...`;
+    }
+    case "Bash": {
+      const desc = typeof input.description === "string" ? input.description : null;
+      if (desc !== null) return desc;
+      const cmd = typeof input.command === "string" ? input.command : "";
+      if (cmd.includes("extract-video")) return "動画を要約しています。しばらくお待ちください...";
+      return "コマンドを実行しています...";
+    }
+    case "TaskOutput":
+      return "バックグラウンドタスクの完了を待っています...";
+    case "Agent":
+      return "サブエージェントに調査を依頼しています...";
+    case "Glob":
+      return "ファイルを検索しています...";
+    case "WebFetch": {
+      const url = typeof input.url === "string" ? input.url : "";
+      return `${url} を取得しています...`;
     }
   }
+  return null;
+}
+
+// allowedTools は canUseTool をスキップするため、onToolUse で安全チェックを行う
+function createHandleToolUse(
+  onEvent: (event: LoopEvent) => void,
+): (toolName: string, input: Record<string, unknown>) => void {
+  return (toolName, input) => {
+    const activityMessage = describeToolActivity(toolName, input);
+    if (activityMessage !== null) {
+      console.log(`[coach] ${activityMessage}`);
+      onEvent({ kind: "tool_activity", message: activityMessage });
+    }
+
+    switch (toolName) {
+      case "Bash": {
+        const command = input.command;
+        if (typeof command !== "string" || !validateBashCommand(command).isValid) {
+          throw new Error(`[coach] 不正なBashコマンドを検出。セッションを中断: ${command}`);
+        }
+        // extract-video は run_in_background で実行すべき。同期だと Bash の 10 分制約に引っかかる。
+        // throw はしない（同期でも 3 定数 30 分化のフォールバックが効く可能性があるため）。
+        const isExtractVideoCommand = command.includes("extract-video");
+        const isSynchronousExecution = input.run_in_background !== true;
+        if (isExtractVideoCommand && isSynchronousExecution) {
+          console.warn(
+            "[coach] 警告: extract-video.ts が同期実行されました。run_in_background: true を推奨します。",
+          );
+        }
+        break;
+      }
+      case "Write": {
+        const filePath = input.file_path;
+        if (typeof filePath === "string") {
+          const resolved = resolveSkillPath(filePath);
+          const skillsRoot = resolve(SKILLS_ROOT);
+          if (resolved !== skillsRoot && !resolved.startsWith(skillsRoot + sep)) {
+            throw new Error(`[coach] skills/ 外への書き込みを検出。セッションを中断: ${filePath}`);
+          }
+        }
+        break;
+      }
+    }
+  };
 }
 
 export type { UserMessage };
@@ -81,6 +117,7 @@ type LoopEvent =
       readonly stepIndex: number;
       readonly newStatus: PlanStepStatus;
     }
+  | { readonly kind: "tool_activity"; readonly message: string }
   | { readonly kind: "mode_changed"; readonly mode: LoopMode }
   | { readonly kind: "stopped" };
 
@@ -438,7 +475,7 @@ async function executeOneRound(
     tools: ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob", "TaskOutput"],
     allowedTools: ["Read", "Agent", "Bash", "WebSearch", "Write", "TaskOutput"],
     canUseTool: createToolPermissionGuard(),
-    onToolUse: handleToolUse,
+    onToolUse: createHandleToolUse(onEvent),
     maxTurns: ADVISOR_MAX_TURNS,
     timeoutMs: ADVISOR_TIMEOUT_MS,
     signal: options.signal,

@@ -178,7 +178,10 @@ ${sanitized}
   }
 
   if (input.previousAdvices.length > 0) {
-    const sanitizedHistory = input.previousAdvices
+    // トークン消費を抑えるため直近 5 件のみ system prompt に含める。
+    // 414 件全件 → 5 件で推定 4 万トークン → 500 トークンに削減。
+    const recentAdvices = input.previousAdvices.slice(-5);
+    const sanitizedHistory = recentAdvices
       .map((a, i) => {
         const safe = a.content
           .replaceAll("</advice-history>", "")
@@ -186,10 +189,14 @@ ${sanitized}
         return `  ${i + 1}. ${safe}`;
       })
       .join("\n");
+    const totalCount = input.previousAdvices.length;
+    const shownCount = recentAdvices.length;
+    const omittedNote =
+      totalCount > shownCount ? `（全${totalCount}件中、直近${shownCount}件のみ表示）\n` : "";
     sections.push(`
 ## 前回セッションのアドバイス履歴
-このセッションは前回のセッションから復元されたものです。以下はあなたが前回のセッションで行ったアドバイスの履歴です。
-同じアドバイスを繰り返さず、この文脈を踏まえて次のアドバイスを行ってください。
+このセッションは前回のセッションから復元されたものです。以下はあなたが前回のセッションで行ったアドバイスの直近履歴です。
+${omittedNote}同じアドバイスを繰り返さず、この文脈を踏まえて次のアドバイスを行ってください。
 
 <advice-history>
 ${sanitizedHistory}

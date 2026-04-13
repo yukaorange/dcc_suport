@@ -36,6 +36,11 @@ type SandboxSettings = {
   };
 };
 
+type ThinkingConfig =
+  | { readonly type: "adaptive" }
+  | { readonly type: "enabled"; readonly budgetTokens: number }
+  | { readonly type: "disabled" };
+
 export type InvokeClaudeOptions = {
   readonly prompt: string;
   readonly sessionId?: string;
@@ -50,6 +55,8 @@ export type InvokeClaudeOptions = {
   readonly maxTurns?: number;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
+  readonly effort?: "low" | "medium" | "high" | "max";
+  readonly thinking?: ThinkingConfig;
 };
 
 let activeQueryStartedAt: number | null = null;
@@ -184,6 +191,14 @@ function buildQueryOptions(options: InvokeClaudeOptions): SDKOptions {
 
   if (options.maxTurns) {
     queryOptions.maxTurns = options.maxTurns;
+  }
+
+  if (options.effort) {
+    queryOptions.effort = options.effort;
+  }
+
+  if (options.thinking) {
+    queryOptions.thinking = options.thinking;
   }
 
   return queryOptions;

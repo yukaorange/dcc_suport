@@ -5,6 +5,7 @@ import { type CapturedImage, captureScreen } from "./capture";
 import type { CoachConfig } from "./config";
 import { computeDiff } from "./diff";
 import { checkSessionContinuity, type EngineResult, invokeClaude } from "./engine";
+import { YOUTUBE_URL_PATTERN } from "./gemini";
 import type { LoopMode, RoundTrigger, UserMessage } from "./loop-types";
 import { COACH_TEMP_DIR, SKILLS_ROOT } from "./paths";
 import type { Plan, PlanStepStatus } from "./planner";
@@ -454,6 +455,11 @@ async function executeOneRound(
 
   const isFirstRound = state.previousImage === null;
 
+  // YouTube URL を含むユーザーメッセージの場合のみ thinking を有効にする。
+  // 通常ラウンドは thinking 無しで応答速度を優先する。
+  const hasYouTubeUrl =
+    input.userMessage !== null && YOUTUBE_URL_PATTERN.test(input.userMessage.text);
+
   // @throws — SDK レベルのエラー
   const engineResult = await invokeClaude({
     prompt: buildCoachUserPrompt({
@@ -479,6 +485,8 @@ async function executeOneRound(
     maxTurns: ADVISOR_MAX_TURNS,
     timeoutMs: ADVISOR_TIMEOUT_MS,
     signal: options.signal,
+    effort: "high",
+    thinking: hasYouTubeUrl ? { type: "adaptive" } : { type: "disabled" },
   });
 
   if (!engineResult.isOk) {

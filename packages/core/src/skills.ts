@@ -301,9 +301,19 @@ export function createToolPermissionGuard(): CanUseTool {
   return async (toolName, input) => {
     const policy = COACH_TOOL_POLICIES[toolName];
     if (policy === undefined) {
-      return { behavior: "deny", message: `${toolName} is not registered in COACH_TOOL_POLICIES` };
+      return {
+        behavior: "deny",
+        message: `${toolName} is not registered in COACH_TOOL_POLICIES`,
+      };
     }
-    if (policy.kind === "auto-allow") return ALLOW;
-    return policy.check(input);
+    // SDK 内部は allow 応答に必ず `updatedInput: input` を詰めている。
+    // 省くと "Orphaned permission: updatedInput is undefined" という warning が出て、
+    // 下流のツール実行が異常終了し、Claude には ZodError として観測される。
+    if (policy.kind === "auto-allow") {
+      return { behavior: "allow", updatedInput: input };
+    }
+    const result = policy.check(input);
+    if (result.behavior === "deny") return result;
+    return { behavior: "allow", updatedInput: input };
   };
 }

@@ -15,8 +15,8 @@
     "@trpc/react-query": "^11.13.4"
   },
   "scripts": {
-    "start": "concurrently -k -n server,client -c blue,green 'bun run --filter @dcc/server dev' 'bun run --filter @dcc/client dev'",
-    "dev": "concurrently -k -n server,client -c blue,green 'bun run --filter @dcc/server dev' 'bun run --filter @dcc/client dev'",
+    "start": "concurrently -k -n server,client -c blue,green 'bun --watch run packages/server/src/index.ts' 'bun run --filter @dcc/client dev'",
+    "dev": "concurrently -k -n server,client -c blue,green 'bun --watch run packages/server/src/index.ts' 'bun run --filter @dcc/client dev'",
     "dev:cli": "bun --watch run packages/cli/src/index.ts",
     "start:web": "bun run packages/server/src/index.ts",
     "typecheck": "tsc -b",

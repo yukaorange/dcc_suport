@@ -1,7 +1,7 @@
 import { buildAgentDefinitions } from "../agents";
 import { invokeClaude } from "../engine";
 import { buildCoachSystemPrompt } from "../prompts";
-import { createToolPermissionGuard } from "../skills";
+import { COACH_ALLOWED_TOOLS, COACH_TOOLS, createToolPermissionGuard } from "../skills";
 import { printVerifyResult, type VerifyResult } from "./types";
 
 const VERIFY_NAME = "youtube url extract flow (root direct)";
@@ -76,8 +76,8 @@ export async function verifyAgentWithGuard(): Promise<VerifyResult> {
       previousAdvices: [],
     }),
     agents: buildAgentDefinitions(),
-    tools: ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob"],
-    allowedTools: ["Read", "Agent", "Bash", "WebSearch", "Write"],
+    tools: [...COACH_TOOLS],
+    allowedTools: [...COACH_ALLOWED_TOOLS],
     canUseTool: createToolPermissionGuard(),
     onToolUse: (toolName, input) => {
       const detail =

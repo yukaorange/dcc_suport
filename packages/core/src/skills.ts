@@ -242,25 +242,68 @@ function checkBashPermission(input: Record<string, unknown>): PermissionResult {
   return ALLOW;
 }
 
-export function createToolPermissionGuard(): CanUseTool {
-  const allowedWriteRoot = resolve(SKILLS_ROOT);
-  const allowedWritePrefix = allowedWriteRoot + sep;
+/**
+ * コーチループで使うツール権限の一元レジストリ。
+ *
+ * 背景: 従来、権限ルールは以下の 4 箇所に分散していて、ツール追加のたびに
+ * すべての箇所を整合させる必要があった。特に `allowedTools` は
+ * 「canUseTool をスキップして自動承認する」設定のため、同じツールを
+ * allowedTools と canUseTool の両方に書くと、canUseTool の deny が
+ * silent bypass されるバグを招いた（例: Bash の find を deny するはずが素通り）。
+ *
+ * ┌─────────────────────────────────────┬─────────────────────────────────────────────┐
+ * │ tools: [...] (coach-loop.ts)        │ そもそも使えるツールの一覧                  │
+ * ├─────────────────────────────────────┼─────────────────────────────────────────────┤
+ * │ allowedTools: [...] (coach-loop.ts) │ canUseTool をスキップして自動承認するツール │
+ * ├─────────────────────────────────────┼─────────────────────────────────────────────┤
+ * │ canUseTool の switch (skills.ts)    │ ツールごとの allow/deny 判定ロジック        │
+ * ├─────────────────────────────────────┼─────────────────────────────────────────────┤
+ * │ onToolUse の switch (coach-loop.ts) │ 通知・警告ロジック                          │
+ * └─────────────────────────────────────┴─────────────────────────────────────────────┘
+ *
+ * このレジストリは上記 1〜3 を 1 箇所に集約する。
+ * - `tools`         → {@link COACH_TOOLS}（レジストリのキー集合）
+ * - `allowedTools`  → {@link COACH_ALLOWED_TOOLS}（`kind: "auto-allow"` のツールだけ自動抽出）
+ * - `canUseTool`    → {@link createToolPermissionGuard}（レジストリの `check` を束ねる）
+ *
+ * 4 層目の `onToolUse`（通知・警告）は観測層なので coach-loop.ts に残す。
+ *
+ * これにより「gated なのに allowedTools に入れる」ミスが構造的に起きなくなる。
+ */
+type ToolPolicy =
+  | { readonly kind: "auto-allow" }
+  | {
+      readonly kind: "gated";
+      readonly check: (input: Record<string, unknown>) => PermissionResult;
+    };
 
+const WRITE_ROOT = resolve(SKILLS_ROOT);
+const WRITE_PREFIX = WRITE_ROOT + sep;
+
+export const COACH_TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
+  Read: { kind: "gated", check: (input) => checkReadPermission("Read", input) },
+  Glob: { kind: "gated", check: (input) => checkReadPermission("Glob", input) },
+  Write: { kind: "gated", check: (input) => checkWritePermission(input, WRITE_ROOT, WRITE_PREFIX) },
+  Bash: { kind: "gated", check: checkBashPermission },
+  Agent: { kind: "auto-allow" },
+  WebSearch: { kind: "auto-allow" },
+  WebFetch: { kind: "auto-allow" },
+  TaskOutput: { kind: "auto-allow" },
+};
+
+export const COACH_TOOLS: readonly string[] = Object.keys(COACH_TOOL_POLICIES);
+
+export const COACH_ALLOWED_TOOLS: readonly string[] = Object.entries(COACH_TOOL_POLICIES)
+  .filter(([, policy]) => policy.kind === "auto-allow")
+  .map(([name]) => name);
+
+export function createToolPermissionGuard(): CanUseTool {
   return async (toolName, input) => {
-    switch (toolName) {
-      case "Read":
-      case "Glob":
-        return checkReadPermission(toolName, input);
-      case "Write":
-        return checkWritePermission(input, allowedWriteRoot, allowedWritePrefix);
-      case "Bash":
-        return checkBashPermission(input);
-      case "WebSearch":
-      case "WebFetch":
-      case "TaskOutput":
-        return ALLOW;
-      default:
-        return { behavior: "deny", message: `${toolName} is not allowed for researcher` };
+    const policy = COACH_TOOL_POLICIES[toolName];
+    if (policy === undefined) {
+      return { behavior: "deny", message: `${toolName} is not registered in COACH_TOOL_POLICIES` };
     }
+    if (policy.kind === "auto-allow") return ALLOW;
+    return policy.check(input);
   };
 }

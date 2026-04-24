@@ -32,6 +32,8 @@ vi.mock("../src/agents", () => ({
 
 vi.mock("../src/skills", () => ({
   createToolPermissionGuard: vi.fn().mockReturnValue(async () => ({ behavior: "allow" })),
+  COACH_TOOLS: ["Read", "Glob", "Write", "Bash", "Agent", "WebSearch", "WebFetch", "TaskOutput"],
+  COACH_ALLOWED_TOOLS: ["Agent", "WebSearch", "WebFetch", "TaskOutput"],
 }));
 
 const FAKE_IMAGE = {

@@ -1,5 +1,5 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
-import { join, resolve, sep } from "node:path";
+import { join } from "node:path";
 import { buildAgentDefinitions } from "./agents";
 import { type CapturedImage, captureScreen } from "./capture";
 import type { CoachConfig } from "./config";
@@ -7,10 +7,10 @@ import { computeDiff } from "./diff";
 import { checkSessionContinuity, type EngineResult, invokeClaude } from "./engine";
 import { YOUTUBE_URL_PATTERN } from "./gemini";
 import type { LoopMode, RoundTrigger, UserMessage } from "./loop-types";
-import { COACH_TEMP_DIR, SKILLS_ROOT } from "./paths";
+import { COACH_TEMP_DIR } from "./paths";
 import type { Plan, PlanStepStatus } from "./planner";
 import { buildCoachSystemPrompt, buildCoachUserPrompt, type RestoredAdvice } from "./prompts";
-import { createToolPermissionGuard, resolveSkillPath, validateBashCommand } from "./skills";
+import { COACH_ALLOWED_TOOLS, COACH_TOOLS, createToolPermissionGuard } from "./skills";
 
 const ADVISOR_MAX_TURNS = 20;
 const ADVISOR_TIMEOUT_MS = 1_800_000;
@@ -56,37 +56,20 @@ function describeToolActivity(toolName: string, input: Record<string, unknown>):
   return null;
 }
 
-// allowedTools は canUseTool をスキップするため、onToolUse で安全チェックを行う。
-// @throws — 不正な Bash コマンドや skills/ 外への Write を検出した場合
-function validateToolSafety(toolName: string, input: Record<string, unknown>): void {
-  switch (toolName) {
-    case "Bash": {
-      const command = input.command;
-      if (typeof command !== "string" || !validateBashCommand(command).isValid) {
-        throw new Error(`[coach] 不正なBashコマンドを検出。セッションを中断: ${command}`);
-      }
-      // extract-video は run_in_background で実行すべき。同期だと Bash の 10 分制約に引っかかる。
-      // throw はしない（同期でも 30 分 timeout のフォールバックが効く可能性があるため）。
-      const isExtractVideoCommand = command.includes("extract-video");
-      const isSynchronousExecution = input.run_in_background !== true;
-      if (isExtractVideoCommand && isSynchronousExecution) {
-        console.warn(
-          "[coach] 警告: extract-video.ts が同期実行されました。run_in_background: true を推奨します。",
-        );
-      }
-      break;
-    }
-    case "Write": {
-      const filePath = input.file_path;
-      if (typeof filePath === "string") {
-        const resolved = resolveSkillPath(filePath);
-        const skillsRoot = resolve(SKILLS_ROOT);
-        if (resolved !== skillsRoot && !resolved.startsWith(skillsRoot + sep)) {
-          throw new Error(`[coach] skills/ 外への書き込みを検出。セッションを中断: ${filePath}`);
-        }
-      }
-      break;
-    }
+// 許可判定は canUseTool (createToolPermissionGuard) が担当するため、
+// ここでは監査ログと extract-video の同期実行警告だけに限定する。
+// throw するとラウンドごとセッションが死ぬので、deny は必ず canUseTool 側で扱う。
+function warnOnRiskyToolUsage(toolName: string, input: Record<string, unknown>): void {
+  if (toolName !== "Bash") return;
+  const command = input.command;
+  if (typeof command !== "string") return;
+  // extract-video を同期で回すと Bash の 10 分制約で途中打ち切りになりやすい。
+  const isExtractVideoCommand = command.includes("extract-video");
+  const isSynchronousExecution = input.run_in_background !== true;
+  if (isExtractVideoCommand && isSynchronousExecution) {
+    console.warn(
+      "[coach] 警告: extract-video.ts が同期実行されました。run_in_background: true を推奨します。",
+    );
   }
 }
 
@@ -99,7 +82,7 @@ function createHandleToolUse(
       console.log(`[coach] ${activityMessage}`);
       onEvent({ kind: "tool_activity", message: activityMessage });
     }
-    validateToolSafety(toolName, input);
+    warnOnRiskyToolUsage(toolName, input);
   };
 }
 
@@ -487,8 +470,10 @@ async function executeOneRound(
       previousAdvices: options.previousAdvices,
     }),
     agents: buildAgentDefinitions(),
-    tools: ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob", "TaskOutput"],
-    allowedTools: ["Read", "Agent", "Bash", "WebSearch", "Write", "TaskOutput"],
+    // tools / allowedTools / canUseTool は skills.ts の COACH_TOOL_POLICIES から自動導出される。
+    // ツール追加・権限変更はレジストリ側で一元管理する。
+    tools: [...COACH_TOOLS],
+    allowedTools: [...COACH_ALLOWED_TOOLS],
     canUseTool: createToolPermissionGuard(),
     onToolUse: createHandleToolUse(onEvent),
     maxTurns: ADVISOR_MAX_TURNS,

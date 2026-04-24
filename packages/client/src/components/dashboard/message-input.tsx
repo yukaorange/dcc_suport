@@ -3,6 +3,7 @@ import { ArrowRight, Loader2, Play } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { extractImageFilesFromClipboard } from "@/lib/clipboard-image";
 import { ACCEPTED_IMAGE_TYPES, readFileAsBase64 } from "@/lib/image-file";
 import { trpc } from "../../trpc";
 
@@ -88,11 +89,10 @@ export function MessageInput({
     }
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files === null || e.target.files.length === 0) return;
-
+  const addImagesFromFiles = async (files: readonly File[]) => {
     const remaining = MAX_ATTACHMENTS - attachedImages.length;
-    const filesToProcess = Array.from(e.target.files).slice(0, remaining);
+    if (remaining <= 0) return;
+    const filesToProcess = files.slice(0, remaining);
     const newImages: AttachedImage[] = [];
 
     for (const file of filesToProcess) {
@@ -107,10 +107,26 @@ export function MessageInput({
       }
     }
 
-    setAttachedImages([...attachedImages, ...newImages]);
+    // 非同期処理中に添付が増える可能性があるため、関数形式で最新 state を参照する
+    if (newImages.length > 0) {
+      setAttachedImages((prev) => [...prev, ...newImages]);
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files === null || e.target.files.length === 0) return;
+    await addImagesFromFiles(Array.from(e.target.files));
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const imageFiles = extractImageFilesFromClipboard(e.clipboardData);
+    if (imageFiles.length === 0) return;
+    // 画像貼付時のみテキストへのフォールバック挿入を抑止する（通常のテキスト貼付はそのまま）
+    e.preventDefault();
+    void addImagesFromFiles(imageFiles);
   };
 
   const handleRemoveImage = (imageId: string) => {
@@ -212,10 +228,11 @@ export function MessageInput({
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={
             mode === "manual"
-              ? "コーチにメッセージを送る。何もなければ「次へ進む」で次ラウンドを開始（⌘+Enter で送信）"
-              : "コーチにメッセージを送る（⌘+Enter で送信）"
+              ? "コーチにメッセージを送る。何もなければ「次へ進む」で次ラウンドを開始（⌘+Enter で送信、⌘+V で画像貼付）"
+              : "コーチにメッセージを送る（⌘+Enter で送信、⌘+V で画像貼付）"
           }
           className="min-h-[40px] resize-none rounded-xl"
           rows={1}

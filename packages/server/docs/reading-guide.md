@@ -1,6 +1,6 @@
 # @dcc/server リーディングガイド
 
-> 最終更新: 2026-04-11
+> 最終更新: 2026-04-27
 
 ## このパッケージの役割
 
@@ -27,14 +27,15 @@ packages/server/src/
 │
 ├── db/
 │   ├── database.ts       ← SQLite + Drizzle ORM 初期化
-│   ├── schema.ts         ← テーブル定義（sessions, plans, advices）
-│   ├── sessions.ts       ← sessions テーブル操作
+│   ├── schema.ts         ← テーブル定義（sessions, plans, advices, session_images）
+│   ├── sessions.ts       ← sessions テーブル操作 + purgeOldSessions()
 │   ├── plans.ts          ← plans テーブル操作 + JSON パース
-│   └── advices.ts        ← advices テーブル操作
+│   ├── advices.ts        ← advices テーブル操作（isRestored 含む）
+│   └── session-images.ts ← session_images テーブル操作（reference / attachment 画像の保存・取得・コピー）
 │
 ├── lib/
 │   ├── coach-session.ts  ← [最重要] コーチングループのライフサイクル管理
-│   ├── start-session.ts  ← [重要] セッション開始の共通ワークフロー（setup/restore両方が使用）
+│   ├── start-session.ts  ← [重要] setup.start からのセッション開始ワークフロー + schedulePurge()
 │   ├── image-store.ts    ← Base64画像のバリデーション・保存
 │   └── logger.ts         ← タグ付きログユーティリティ
 │
@@ -54,25 +55,25 @@ packages/server/src/
 
 ## 起動フロー
 
-`bun run packages/server/src/index.ts` で何が起きるか。
+ルートから `bun run dev`（または `bun run start:web`）で起動する。`process.cwd()` をリポジトリルートに固定するため、ルートの `package.json` は `bun --watch run packages/server/src/index.ts` を直接呼ぶ形にしてある（旧 `bun run --filter @dcc/server dev` だと CWD が `packages/server/` になり `.env` の auto-load が効かなかった）。
 
 ```mermaid
 sequenceDiagram
-    participant index.ts
+    participant Index as index.ts
     participant Core as @dcc/core
     participant DB as database.ts
     participant App as app.ts
     participant Bun as Bun.serve
 
-    index.ts->>Core: loadConfig(config.json)
-    index.ts->>DB: createDatabase(dcc.sqlite)
-    index.ts->>index.ts: createEventBus()
-    index.ts->>index.ts: createPendingPlanCache()
-    index.ts->>index.ts: createCoachSession({ config, eventBus, db })
-    index.ts->>App: createApp({ createContext })
+    Index->>Core: loadConfig(config.json)
+    Index->>DB: createDatabase(dcc.sqlite)
+    Index->>Index: createEventBus()
+    Index->>Index: createPendingPlanCache()
+    Index->>Index: createCoachSession({ config, eventBus, db })
+    Index->>App: createApp({ createContext })
     App->>App: Hono + tRPC fetchRequestHandler
     App->>App: serveStatic（本番用静的ファイル）
-    index.ts->>Bun: Bun.serve({ port: 3456, fetch: app.fetch })
+    Index->>Bun: Bun.serve({ port: 3456, fetch: app.fetch })
 ```
 
 **読むべきファイル**: `index.ts` → `app.ts` → `trpc/context.ts`
@@ -106,7 +107,7 @@ DBに書き込む前のプランを一時保持するインメモリキャッシ
 ```mermaid
 flowchart TD
     subgraph "1. プラン生成→セッション開始の橋渡し"
-        A["plan.generate"] -->|"cache.set(planId, { plan, imagePath, goal })"| C["PendingPlanCache"]
+        A["plan.generate"] -->|"cache.set(planId, { plan, referenceImages, goalDescription })"| C["PendingPlanCache"]
         C -->|"cache.get(planId)"| B["setup.start"]
         B -->|"cache.delete(planId)"| C
     end
@@ -140,16 +141,16 @@ sequenceDiagram
     participant Loop as @dcc/core coach-loop
 
     Note over C,P: Phase 1: プラン生成
-    C->>P: plan.generate({ image, goal })
-    P->>IS: saveBase64Image(base64, fileName)
-    IS-->>P: { filePath }
-    P->>Core: generatePlan({ imagePath, goal })
+    C->>P: plan.generate({ referenceImages[], goalDescription })
+    P->>IS: saveBase64Images(referenceImages)
+    IS-->>P: [{ path, label }, ...]
+    P->>Core: generatePlan({ referenceImages, goalDescription })
     Core-->>P: { plan }
-    P->>Cache: cache.set(planId, { plan, imagePath, goal })
+    P->>Cache: cache.set(planId, { plan, referenceImages, goalDescription })
     P-->>C: { planId, plan }
 
     Note over C,P: Phase 1.5: プラン再生成（任意）
-    C->>P: plan.generate({ ..., feedback, previousPlanId })
+    C->>P: plan.generate({ ..., revisionFeedback, previousPlanId })
     P->>Cache: cache.get(previousPlanId) → previousPlan
     P->>Core: generatePlan({ ..., revisionFeedback, previousPlan })
     Core-->>P: { plan }
@@ -159,15 +160,17 @@ sequenceDiagram
     Note over C,S: Phase 2: セッション開始
     C->>S: setup.start({ displayId, displayName, planId })
     S->>Cache: cache.get(planId)
-    Cache-->>S: { plan, imagePath, goal }
+    Cache-->>S: { plan, referenceImages, goalDescription }
     S->>Cache: cache.delete(planId)
     S->>SS: startSession(deps, params)
     SS->>DB: insertSession()
     SS->>DB: insertPlan()
+    SS->>DB: insertSessionImages(reference)
     SS->>CS: coachSession.start(options)
     CS->>Core: loadSkillManifest()
     CS->>Loop: startCoachLoop()
     Note over Loop: ループ開始（非同期で継続）
+    SS->>SS: schedulePurge() (setImmediate で非同期)
     SS-->>S: { sessionId }
     S-->>C: { sessionId }
 ```
@@ -222,31 +225,46 @@ flowchart LR
 > **注意**: `stopped` イベントは core の coach-loop が発火するのではなく、server の `coach-session.ts` が `loopFinished` Promise の `.then` / `.catch` 両方で EventBus へ publish する。「成功/失敗問わずループが終端した」というセマンティクスを backend が保証する契約。`.catch` 経路では `engine_error` の後に `stopped` も流す。
 >
 > **順序が重要**: `stopped` を publish する**前**に `finalizeSession()` ヘルパー（`endSession()` を `try/catch` で保護）を呼んで DB の `endedAt` を埋める。DB エラーが発生しても `stopped` 配信は止まらない。ただし DB エラー時は `endedAt` が NULL のまま残るため、client 側では `stopped` 受信時に **invalidate ではなく `setData` で `endedAt` を直接埋める** セーフティネット設計を採用している（`use-loop-events.ts` 参照）。
+>
+> **`tool_activity` イベント**: ツール実行中の進捗メッセージ（例: 「YouTube 動画を要約しています...」）も同じ SSE チャンネルで配信される。DB 永続化の対象外で、SSE のみで流れる。client 側では `onToolActivity` 経由で「次へ進む」のローディング表示文言を動的に切り替える。
 
 **読むべきファイル**: `lib/coach-session.ts`（イベントハンドラ部分）→ `pure/event-bus.ts` → `trpc/routers/events.ts`
 
 ## メインフロー3: セッション復元
 
-過去セッションの復元は `session.restore` → `startSession()` の共通パスを通る。
+過去セッションのアドバイス履歴を引き継いで**新セッション**を作成する。`startSession()` ではなく `session.restore` ルーター内で完結する 3 フェーズ構造（DB 直接操作 → coachSession.start → schedulePurge）。
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant SR as session.ts (restore)
     participant DB as db/*.ts
-    participant SS as start-session.ts
+    participant CS as coach-session.ts
+    participant Loop as @dcc/core coach-loop
 
-    C->>SR: session.restore({ id })
-    SR->>DB: findSessionById(id)
-    SR->>DB: findPlanBySessionId(id)
-    SR->>DB: parsePlanRow() → Plan型
-    SR->>SS: startSession(deps, { goal, plan, ... })
-    Note over SS: insertSession + insertPlan + coachSession.start
-    SS-->>SR: { sessionId }
-    SR-->>C: { sessionId }
+    C->>SR: session.restore({ id })  ※id = 復元元セッションID
+
+    Note over SR,DB: Phase 1: DB トランザクションで sessions/plans/advices を複製
+    SR->>DB: findSessionById(input.id)
+    SR->>DB: findPlanBySessionId(input.id)
+    SR->>DB: tx { insertSession(新ID), insertPlan(コピー), insertAdvices(isRestored: 1) }
+
+    Note over SR: Phase 1.5: トランザクション後に画像コピー
+    SR->>DB: copyReferenceImages(input.id → 新ID)
+
+    Note over SR,Loop: Phase 2: ループ起動 + 履歴注入
+    SR->>DB: findAdvicesBySessionId(新ID) → previousAdvices
+    SR->>CS: coachSession.start({ ..., previousAdvices, plan })
+    CS->>Loop: startCoachLoop()
+    Note over CS: 起動失敗時は endSession で補償（try/catch）
+
+    Note over SR: Phase 3: 古いセッションを非同期パージ
+    SR->>SR: schedulePurge(db, 新ID)（setImmediate）
+
+    SR-->>C: { sessionId: 新ID }
 ```
 
-`start-session.ts` は `setup.start` と `session.restore` の**両方**が使用する共通ワークフロー。DB永続化 → ループ起動の接続点。
+> `start-session.ts` の `startSession()` は **`setup.start` 専用**。`session.restore` は履歴コピーが必要なため共通化せず、ルーター内に専用フローを実装している。両者の共通点は `coachSession.start` を呼ぶ点と `schedulePurge` を呼ぶ点のみ。
 
 ## DBスキーマ
 
@@ -255,11 +273,10 @@ erDiagram
     sessions {
         TEXT id PK
         TEXT goal
-        TEXT reference_image_path
         TEXT display_id
-        TEXT display_name
+        TEXT display_name "default=''"
         TEXT started_at
-        TEXT ended_at
+        TEXT ended_at "NULLなら進行中"
     }
     plans {
         TEXT id PK
@@ -272,19 +289,31 @@ erDiagram
     advices {
         TEXT id PK
         TEXT session_id FK
-        TEXT plan_id FK
+        TEXT plan_id FK "nullable"
         INTEGER round_index
         TEXT content
         INTEGER timestamp_ms
+        INTEGER is_restored "0|1: 復元由来か"
+    }
+    session_images {
+        TEXT id PK
+        TEXT session_id FK
+        TEXT file_path
+        TEXT label
+        INTEGER sort_order
+        TEXT image_type "reference|attachment"
     }
 
     sessions ||--o{ plans : "1:N"
     sessions ||--o{ advices : "1:N"
+    sessions ||--o{ session_images : "1:N"
     plans ||--o{ advices : "0:N"
 ```
 
 - `plans.steps` は `PlanStep[]` のJSON文字列。`parsePlanRow()` / `parseStepsJson()` でデシリアライズ
-- `advices` は coach-loop の `advice` イベント到着時に1行ずつ INSERT
+- `advices` は coach-loop の `advice` イベント到着時に 1 行ずつ INSERT。`isRestored` は `session.restore` でコピーされたものに `1` が立つ
+- `session_images` は参考画像（`image_type: "reference"`）と添付画像（`image_type: "attachment"`、`sendMessage` 経由で保存）を 1 つのテーブルで管理。インデックス: `idx_session_images_session`
+- `purgeOldSessions()`: セッション数が `MAX_SESSIONS = 200` を超えたら古いものから削除し、`sessions` / `plans` / `advices` / `session_images` をカスケード除去 + 参照されない画像ファイルを `unlink`。`setup.start` / `session.restore` 完了後に `schedulePurge()` 経由で非同期実行される
 
 ## coach-session.ts: ライフサイクル管理
 
@@ -308,10 +337,12 @@ stateDiagram-v2
 | メソッド | 役割 |
 |---|---|
 | `start(options)` | コーチングループ起動。常に `initialMode: "manual"` で開始 |
+| `getActiveSessionId()` | 現在アクティブなセッション ID を返す。なければ `null` |
+| `isSessionActive(sessionId)` | 指定セッションがアクティブか判定（ルーター側の事前ガード用） |
 | `getMode(sessionId)` | 現在のモード取得（非アクティブなら `null`） |
 | `setMode(sessionId, mode)` | manual/auto 切替を core 層に委譲 |
 | `requestNextRound(sessionId)` | 「次へ進む」要求を core 層に委譲（連打 dedupe は core 側） |
-| `submitMessage(sessionId, msg)` | ユーザーメッセージ送信 |
+| `submitMessage(sessionId, msg)` | ユーザーメッセージ送信（添付画像があれば `session_images` に "attachment" として保存） |
 | `stop()` | abort で全終了 |
 
 旧仕様の `pause` / `resume` / `isSessionPaused` は **削除済み**。`setMode("manual")` で「自動ループを止める」という意味になる。
@@ -339,7 +370,7 @@ flowchart TD
 1. **`index.ts`** — 起動で何が組み立てられるか
 2. **`trpc/context.ts`** — 全ルーターに何が渡されるか
 3. **`trpc/routers/plan.ts` → `setup.ts`** — メインのユーザーフロー
-4. **`lib/start-session.ts`** — setup/restore の共通パス。DB永続化とループ起動の接続点
+4. **`lib/start-session.ts`** — setup.start 専用のセッション開始ワークフロー（DB 永続化 → coachSession.start）と `schedulePurge()`。restore は履歴コピーが必要なため `session.ts` ルーター内に専用フローを実装
 5. **`lib/coach-session.ts`** — ループ管理の仕組み
 6. **`trpc/routers/events.ts` + `pure/event-bus.ts`** — SSEの仕組み
 7. **`db/schema.ts`** — テーブル構造

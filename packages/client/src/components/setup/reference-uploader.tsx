@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { extractImageFilesFromClipboard } from "@/lib/clipboard-image";
 import { ACCEPTED_IMAGE_TYPES, readFileAsBase64 } from "@/lib/image-file";
 
 type ReferenceImage = {
@@ -34,7 +35,7 @@ export function ReferenceUploader({
 
   const canAddMore = images.length < maxImageCount;
 
-  const processFiles = async (files: FileList) => {
+  const processFiles = async (files: readonly File[]) => {
     setErrorMessage(null);
     const remaining = maxImageCount - images.length;
     if (remaining <= 0) {
@@ -42,7 +43,7 @@ export function ReferenceUploader({
       return;
     }
 
-    const filesToProcess = Array.from(files).slice(0, remaining);
+    const filesToProcess = files.slice(0, remaining);
     const newImages: ReferenceImage[] = [];
 
     for (const file of filesToProcess) {
@@ -67,18 +68,38 @@ export function ReferenceUploader({
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files.length > 0) {
-      processFiles(e.dataTransfer.files);
+      processFiles(Array.from(e.dataTransfer.files));
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files !== null && e.target.files.length > 0) {
-      processFiles(e.target.files);
+      processFiles(Array.from(e.target.files));
     }
     if (inputRef.current) {
       inputRef.current.value = "";
     }
   };
+
+  // 最新の processFiles を ref で参照することで、stale closure を避けつつ
+  // 毎レンダーでの listener 再アタッチを抑える。
+  const processFilesRef = useRef(processFiles);
+  processFilesRef.current = processFiles;
+
+  // セットアップ画面のどこにフォーカスがあっても ⌘+V で参考画像を追加できるよう、
+  // window レベルで paste を購読する（テキスト系の貼付は extractImageFilesFromClipboard が
+  // 空配列を返すため副作用なし）。
+  useEffect(() => {
+    const handleWindowPaste = (e: ClipboardEvent) => {
+      if (e.clipboardData === null) return;
+      const imageFiles = extractImageFilesFromClipboard(e.clipboardData);
+      if (imageFiles.length === 0) return;
+      e.preventDefault();
+      void processFilesRef.current(imageFiles);
+    };
+    window.addEventListener("paste", handleWindowPaste);
+    return () => window.removeEventListener("paste", handleWindowPaste);
+  }, []);
 
   const handleLabelChanged = (imageId: string, newLabel: string) => {
     onImagesChanged(images.map((img) => (img.id === imageId ? { ...img, label: newLabel } : img)));

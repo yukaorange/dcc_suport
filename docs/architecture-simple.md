@@ -1,6 +1,6 @@
 # アーキテクチャ簡易ガイド
 
-更新日: 2026-04-11
+更新日: 2026-04-27
 
 architecture.md の要点を図中心でまとめた読みやすさ重視の資料。
 詳細は [architecture.md](./architecture.md) を参照。
@@ -55,7 +55,7 @@ AI: 「いい感じ。次はオーバーレイで色を重ねてみては」
 │  │       │  ④ アドバイス or 静観                         │  │
 │  │       │                                             │  │
 │  │       └─ SQLite（セッション履歴保存）                  │  │
-│  │          sessions / plans / advices                  │  │
+│  │          sessions / plans / advices / session_images  │  │
 │  │                                                     │  │
 │  └─────────────────────────────────────────────────────┘  │
 │                                                           │
@@ -134,14 +134,17 @@ core は誰にも依存しない。server と cli が core を使う。client �
 ## 起動コマンド
 
 ```bash
-# GUI版（ブラウザでダッシュボード）
-bun run start:web
-
-# CLI版（ターミナルで操作・既存機能）
+# 開発 / 通常起動（サーバー + Vite を同時起動。dev と start は同じスクリプト）
+# サーバーは `bun --watch run packages/server/src/index.ts` を直接起動して
+# CWD をリポジトリルートに固定する（ルート .env の auto-load を効かせるため）
+bun run dev
 bun run start
 
-# 開発（サーバー + Vite を同時起動）
-bun run dev
+# サーバー単体起動
+bun run start:web
+
+# CLI版（ターミナルで操作・後方互換用）
+bun run dev:cli
 
 # テスト
 bun run test         # 全テスト（unit + server）

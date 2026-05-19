@@ -1,6 +1,6 @@
 # @dcc/client リーディングガイド
 
-> 最終更新: 2026-04-13
+> 最終更新: 2026-04-27
 
 ## このパッケージの役割
 
@@ -35,8 +35,9 @@ packages/client/src/
 │   └── use-loop-events.ts ← [最重要] SSE 購読 → クエリキャッシュ更新の副作用フック
 │
 ├── lib/
-│   ├── image-file.ts     ← File → base64 変換（バリデーション付き）
-│   └── utils.ts          ← cn() ヘルパー（clsx + tailwind-merge）
+│   ├── image-file.ts        ← File → base64 変換（バリデーション付き）
+│   ├── clipboard-image.ts   ← クリップボード paste から画像 File[] を抽出（pasted-<timestamp>-<i>.<ext> で命名）
+│   └── utils.ts             ← cn() ヘルパー（clsx + tailwind-merge）
 │
 ├── components/
 │   ├── shared/
@@ -122,7 +123,8 @@ flowchart LR
     Switch -->|"plan_step_updated"| Cb["onPlanStepUpdated コールバック"]
     Switch -->|"tool_activity"| TA["onToolActivity(event.message)"]
     Switch -->|"querying"| L1["onRoundActivity(true)<br/>+ onToolActivity('AIに問い合わせ中...')"]
-    Switch -->|"advice / silent / engine_error /<br/>no_change / diff_skipped /<br/>session_lost / capture_failed / stopped"| L2["onRoundActivity(false)<br/>+ onToolActivity(null)"]
+    Switch -->|"advice / silent / engine_error /<br/>no_change / diff_skipped /<br/>session_lost / capture_failed"| L2["onRoundActivity(false)<br/>+ onToolActivity(null)"]
+    Switch -->|"stopped"| L3["onRoundActivity(false) のみ<br/>(onToolActivity は呼ばない)"]
     C1 --> Cache["trpc.session.get の<br/>クエリキャッシュ"]
     C2 --> Cache
     C3 --> Cache
@@ -144,7 +146,7 @@ flowchart LR
 | `tool_activity` | なし | — | `event.message`（動的メッセージ） |
 | `plan_step_updated` | `onPlanStepUpdated` 経由で親が更新 | — | — |
 | `mode_changed` | `mode` を上書き | — | — |
-| `stopped` | `endedAt` を ISO 文字列で埋める（**invalidate しない**） | `false` | `null`（クリア） |
+| `stopped` | `endedAt` を ISO 文字列で埋める（**invalidate しない**） | `false` | — （呼ばない） |
 
 ### `stopped` で invalidate しない理由
 
@@ -211,7 +213,7 @@ graph TB
         DP["DashboardPage<br/>useQuery で data 取得"]
     end
     subgraph CoachingFeed_内部
-        CF["CoachingFeed<br/>useLoopEvents で SSE 購読<br/>useState isRoundPending"]
+        CF["CoachingFeed<br/>useLoopEvents で SSE 購読<br/>useState isRoundPending, toolActivityMessage"]
     end
     DP -->|"data"| CF
     DP -.->|"children: PlanProgress"| CF
@@ -285,6 +287,22 @@ flowchart TD
 - `nextRoundMutation.isPending` → mutation 進行中
 - `isRoundPending` → ラウンド進行中（多重押下抑止）
 
+### クリップボード画像貼付（⌘+V）
+
+Textarea に `onPaste` ハンドラを結線し、`lib/clipboard-image.ts` の `extractImageFilesFromClipboard(e.clipboardData)` で画像のみ抽出する。スクリーンショット等で `File.name` が空 / `image.png` 固定になるケースは `pasted-<timestamp>-<i>.<ext>` で命名し直す（添付一覧で識別するため）。
+
+```mermaid
+flowchart LR
+    Paste["⌘+V (Textarea onPaste)"] --> Extract["extractImageFilesFromClipboard()<br/>(lib/clipboard-image.ts)"]
+    Extract -->|"file 配列"| Add["addImagesFromFiles(files)"]
+    Add -->|"readFileAsBase64<br/>(image-file.ts)"| State["setAttachedImages((prev) => [...prev, ...newImages])"]
+    State --> Preview["添付プレビュー（目安 MAX_ATTACHMENTS = 3 枚）"]
+```
+
+- 画像が含まれていれば `e.preventDefault()` してテキストへのフォールバック挿入を抑止。テキストだけの paste は通常通り通る
+- `addImagesFromFiles` は呼び出し時点の `attachedImages.length` で残り枠を計算するため、**並行に複数 paste すると瞬間的に 3 枚を超える可能性がある**（典型的な操作では問題にならない範囲。ハードリミットを保証したい場合は append 側で再チェックが必要）。`setAttachedImages` は関数形式で stale state を回避し、複数のレース時にも積み上げが消えないようにしている
+- placeholder には「⌘+V で画像貼付」も明示
+
 ### sendMessage のフロー（参考）
 
 ```mermaid
@@ -318,7 +336,7 @@ stateDiagram-v2
     reviewing --> [*]: handleApprove() →<br/>setup.start API 成功 →<br/>onCoachingStarted(sessionId)
 ```
 
-`generateMutation` で生成されたプランは server 側の `pendingPlanCache` に TTL 30 分でキャッシュされ、`handleApprove` の `setup.start` で `planId` を渡すと初めて DB に永続化される。
+`generateMutation` は複数枚（1〜5）の参考画像とラベル付き（`referenceImages: { base64, fileName, label }[]`）と `goalDescription` を送る。生成されたプランは server 側の `pendingPlanCache` に `{ plan, referenceImages: { path, label }[], goalDescription }` 形式で TTL 30 分キャッシュされ、`handleApprove` の `setup.start` で `planId` を渡すと初めて DB（`sessions` / `plans` / `session_images`）に永続化される。
 
 ---
 

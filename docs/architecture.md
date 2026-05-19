@@ -1,6 +1,6 @@
 # アーキテクチャ概要
 
-更新日: 2026-04-13
+更新日: 2026-04-27
 
 ## 全体フロー（Web UI 主導 / DCC-37 以降）
 
@@ -44,7 +44,9 @@ flowchart TD
     style loop fill:#f5f5ff,stroke:#9fa8da
 ```
 
-> CLI 版（`bun run start`）も存在する。`packages/cli/src/index.ts` から `startCoachLoop({ initialMode: "auto" })` を直接呼ぶシンプルな構成で、setMode / requestNextRound の UI を持たないため manual モードはサポートしない。後方互換のために残されている。
+> CLI 版（`bun run dev:cli`）も存在する。`packages/cli/src/index.ts` から `startCoachLoop({ initialMode: "auto" })` を直接呼ぶシンプルな構成で、setMode / requestNextRound の UI を持たないため manual モードはサポートしない。後方互換のために残されている。
+>
+> なお `bun run start` / `bun run dev` はどちらも server + client を同時起動するスクリプトで、`bun run start:web` は server 単体起動。
 
 ## モジュール構成と関数マップ
 
@@ -73,8 +75,8 @@ flowchart LR
         output["output.ts<br>─────────────<br>printLoopEvent()<br>printSetupEvent()"]
     end
 
-    subgraph dcc7 ["DCC-7 新規"]
-        skills["skills.ts<br>─────────────<br>buildSkillManifest()<br>loadSkillManifest()<br>createToolPermissionGuard()"]:::new
+    subgraph dcc7 ["DCC-7 新規 + ツール権限レジストリ"]
+        skills["skills.ts<br>─────────────<br>buildSkillManifest()<br>loadSkillManifest()<br>COACH_TOOL_POLICIES<br>COACH_TOOLS<br>COACH_ALLOWED_TOOLS<br>createToolPermissionGuard()<br>validateBashCommand()<br>resolveSkillPath()"]:::new
         agents["agents.ts<br>─────────────<br>buildAgentDefinitions()"]:::new
         gemini["gemini.ts<br>─────────────<br>extractVideoContent()"]:::new
         extractVideo["extract-video.ts<br>─────────────<br>CLIエントリポイント"]:::new
@@ -119,6 +121,7 @@ flowchart LR
 | prompts.ts | あり | test/prompts.test.ts |
 | engine.ts | あり | test/engine.test.ts |
 | skills.ts | あり | test/skills.test.ts |
+| skills.ts (COACH_TOOL_POLICIES 整合性 + guard 判定) | あり | test/tool-permissions.test.ts |
 | agents.ts | あり | test/agents.test.ts |
 | gemini.ts | あり | test/gemini.test.ts（APIキー未設定・URL不正の異常系のみ） |
 | output.ts | なし | 純粋な表示ロジック（console.log のみの副作用） |
@@ -141,6 +144,12 @@ flowchart LR
 |-----------|--------|----------------|
 | setup-flow.ts | あり | test/setup-flow.test.ts（キャンセル動作） |
 
+#### @dcc/client（vitest）
+
+| モジュール | テスト | ファイル / 理由 |
+|-----------|--------|----------------|
+| lib/clipboard-image.ts | あり | test/clipboard-image.test.ts（`extractImageFilesFromClipboard` の出力値ベース） |
+
 #### E2E テスト（Playwright）
 
 | テスト | ファイル / 内容 |
@@ -149,7 +158,7 @@ flowchart LR
 
 ## データフロー: セットアップからコーチングまで
 
-Web UI 経路（`bun run start:web`）の場合は `plan.generate` → `setup.start` の 2 段 mutation で組み立てる。CLI 経路（`bun run start`）は `runSetupFlow()` で同じく `Plan` を組み立てる。どちらも最終的に `startCoachLoop()` に同じ `CoachConfig` / `Plan` / `SkillManifest` を渡す。
+Web UI 経路（`bun run dev` / `bun run start` / `bun run start:web`）の場合は `plan.generate` → `setup.start` の 2 段 mutation で組み立てる。CLI 経路（`bun run dev:cli`）は `runSetupFlow()` で同じく `Plan` を組み立てる。どちらも最終的に `startCoachLoop()` に同じ `CoachConfig` / `Plan` / `SkillManifest` を渡す。
 
 ```mermaid
 flowchart LR
@@ -468,7 +477,7 @@ sequenceDiagram
 ### 全体像：親エージェントとサブエージェントの関係
 
 Claude Agent SDK では、AI は「ツール」を通じてテキスト生成以外のアクション（ファイル読み書き・Web検索・コマンド実行等）を行う。
-本プロジェクトでは、親エージェントが直接ツールを使わず、目的別のサブエージェントに委譲する構成を取っている。
+本プロジェクトでは **root エージェントが advisor 役を兼ねる** 構成（旧 DCC-7 では advisor がサブエージェントだったが現在は廃止）で、`Read` / `Glob` / `Write` / `Bash` / `WebSearch` / `WebFetch` / `TaskOutput` を直接利用する。`Agent` ツールで researcher サブエージェントに調査作業を委譲することもある。
 
 ```mermaid
 flowchart TD
@@ -485,7 +494,7 @@ flowchart TD
     SDK --> Parent
 
     subgraph runtime ["SDK 内部の実行時構造"]
-        Parent["親エージェント（root）<br>───────────<br>allowedTools: Read, Agent, Bash,<br>WebSearch, Write, TaskOutput<br>（自動承認で直接使える）"]
+        Parent["親エージェント（root）<br>───────────<br>allowedTools: Agent, WebSearch,<br>WebFetch, TaskOutput<br>（auto-allow のみ自動承認）<br>Read / Glob / Write / Bash は<br>毎回 canUseTool で判定"]
 
         Parent -->|"方向性判断が必要"| Advisor["advisor<br>───────────<br>tools: なし（対話のみ）<br>方向性・美的判断<br>GUI操作案内<br>進捗評価"]
 
@@ -498,16 +507,18 @@ flowchart TD
     style Researcher fill:#fff3e0
 ```
 
-### 3つの設定プロパティの役割
+### 4つの設定プロパティの役割（権限レジストリで一元化）
 
-`invokeClaude()` に渡す3つのプロパティが、エージェントの権限構造を決定する。
+`invokeClaude()` に渡す 4 つのプロパティが、エージェントの権限構造を決定する。`tools` / `allowedTools` / `canUseTool` の 3 つは `skills.ts` の **`COACH_TOOL_POLICIES` レジストリ**から自動導出される（手書きのリテラルを置かない）。
 
 | プロパティ | 担当関数 | 定義場所 | 役割 |
 |-----------|---------|---------|------|
 | `agents` | `buildAgentDefinitions()` | agents.ts | **誰を呼べるか**：サブエージェントの名簿。名前・説明・プロンプト・使えるツール一覧を定義 |
-| `tools` | — (リテラル) | coach-loop.ts | **セッション全体のツール一覧**：親・サブエージェント含め、このセッションで利用可能な全ツール。ここに含まれないツールはサブエージェントにも渡されない |
-| `allowedTools` | — (リテラル) | coach-loop.ts | **親が直接使えるツール**：`tools` のサブセット。親エージェント（advisor）自身が自動承認で使えるツールを制限する |
-| `canUseTool` | `createToolPermissionGuard()` | skills.ts | **使い方が安全か**：ツール実行の直前に毎回呼ばれるコールバック。引数の内容を見て allow / deny を返す |
+| `tools` | `[...COACH_TOOLS]` | レジストリのキー集合 (skills.ts) | **セッション全体のツール一覧**：親・サブエージェント含め、このセッションで利用可能な全ツール。ここに含まれないツールはサブエージェントにも渡されない |
+| `allowedTools` | `[...COACH_ALLOWED_TOOLS]` | `kind: "auto-allow"` のみ抽出 (skills.ts) | **親が自動承認で直接使えるツール**：レジストリの `auto-allow` ポリシーのもの。`gated` ポリシーのツールはここに入らない |
+| `canUseTool` | `createToolPermissionGuard()` | skills.ts | **使い方が安全か**：レジストリを引いて allow / deny を返す。`gated` の場合は `policy.check(input)` を呼ぶ |
+
+> 旧設計では `tools` / `allowedTools` を `coach-loop.ts` 内のリテラル配列で書き、別途 `canUseTool` の switch 文を `skills.ts` に書いていた。これは「Bash を `allowedTools` に入れたまま `canUseTool` にも deny ロジックを書く」と silent bypass されるバグを生み、過去にセッションごとクラッシュさせる事故を発生させた。レジストリ設計では `auto-allow` と `gated` を排他にすることで、そのクラスのバグが**書けなくなる**。不変条件は `packages/core/test/tool-permissions.test.ts` で固定されている。
 
 ```mermaid
 flowchart LR
@@ -522,9 +533,9 @@ flowchart LR
         Tools2 --> Menu["ここに含まれないツールは<br>サブエージェントにも渡されない"]
     end
 
-    subgraph allowed_prop ["allowedTools（親が直接使えるツール）"]
-        Allowed["allowedTools: Read, Agent,<br>Bash, WebSearch, Write, TaskOutput<br>coach-loop.ts"]
-        Allowed --> Restrict["親（root）が自動承認で<br>直接使えるツール"]
+    subgraph allowed_prop ["allowedTools（auto-allow のみ）"]
+        Allowed["allowedTools: Agent, WebSearch,<br>WebFetch, TaskOutput<br>(COACH_ALLOWED_TOOLS から自動導出)"]
+        Allowed --> Restrict["親（root）が canUseTool スキップで<br>自動承認できるツール<br>= レジストリの auto-allow"]
     end
 
     subgraph canuse_prop ["canUseTool（使い方が安全か）"]
@@ -545,27 +556,27 @@ flowchart LR
 | `allowedTools` | 親エージェントのみ | `tools` のうち、親が自動承認で直接使えるものを制限する |
 
 ```
-tools: ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob", "TaskOutput"]
-                 ↑ セッション全体のメニュー（全員が見える）
+tools (= COACH_TOOLS): ["Read", "Glob", "Write", "Bash", "Agent", "WebSearch", "WebFetch", "TaskOutput"]
+                 ↑ セッション全体のメニュー（全員が見える）= レジストリのキー集合
 
-allowedTools: ["Read", "Agent", "Bash", "WebSearch", "Write", "TaskOutput"]
-                 ↑ 親（root）が自動承認で直接使えるもの
+allowedTools (= COACH_ALLOWED_TOOLS): ["Agent", "WebSearch", "WebFetch", "TaskOutput"]
+                 ↑ 親（root）が canUseTool スキップで自動承認するもの
+                 ↑ レジストリで kind: "auto-allow" のものだけが入る
+                 ↑ Read / Glob / Write / Bash は gated なので毎回 canUseTool で判定される
 ```
 
-**実例**: researcher が Write でスキルファイルに書き込むには、parent の `tools` に `"Write"` が含まれている必要がある。`allowedTools` に含まれていても、それは親が自動承認で使えるだけであり、サブエージェントの agent 定義で `tools: ["Write"]` と指定されていなければ researcher は使えない。
+**実例**: researcher が Write でスキルファイルに書き込むには、parent の `tools` に `"Write"` が含まれている必要がある。サブエージェントの agent 定義で `tools: ["Write"]` と指定されていなければ researcher は使えない。なお `Write` は `gated` なので、root も researcher も毎回 `canUseTool` (`checkWritePermission`) で `skills/` 配下チェックを通る。
 
-### 注意: createToolPermissionGuard() が実質 researcher にのみ影響する理由
+### createToolPermissionGuard() は root と researcher 両方に効く
 
-`createToolPermissionGuard()` は SDK レベルでは**全エージェント共通**のコールバックとして登録される。
-しかし、このコールバックが発火するのは「ツールを実行しようとした瞬間」のみであるため、
-ツールを持たないエージェントには判定が走る機会自体がない。
+`createToolPermissionGuard()` は SDK レベルで**全エージェント共通**のコールバックとして登録される。`gated` ポリシーのツール（Read / Glob / Write / Bash）は、root が呼ぼうが researcher が呼ぼうが毎回判定される。一方、`auto-allow` ポリシーのツール（Agent / WebSearch / WebFetch / TaskOutput）は `allowedTools` に入るため canUseTool 自体がスキップされる。advisor のように `tools: なし` のエージェントには判定が走る機会自体がない。
 
 ```mermaid
 flowchart LR
     subgraph parent ["親エージェント（root）"]
-        PT["allowedTools: Read, Agent,<br>Bash, WebSearch, Write, TaskOutput"]
-        PT --> PA["allowedTools のツールを<br>自動承認で直接使える"]
-        PA -.- PG["canUseTool?<br>→ allowedTools に含まれるツールは<br>SDK がスキップする"]
+        PT["allowedTools: Agent, WebSearch,<br>WebFetch, TaskOutput<br>(auto-allow のみ)"]
+        PT --> PA["allowedTools のツール（auto-allow）は<br>canUseTool スキップで使える"]
+        PT --> PG["Read / Glob / Write / Bash は<br>毎回 canUseTool で判定<br>(レジストリで gated)"]
     end
 
     subgraph advisor_box ["advisor"]
@@ -587,14 +598,13 @@ flowchart LR
 
 | エージェント | tools | canUseTool が発火するか | 理由 |
 |-------------|-------|----------------------|------|
-| 親（root） | `allowedTools: ["Read", "Agent", "Bash", "WebSearch", "Write", "TaskOutput"]` | しない | allowedTools に含まれるツールは SDK が canUseTool をスキップする |
+| 親（root） | `allowedTools: ["Agent", "WebSearch", "WebFetch", "TaskOutput"]`（auto-allow のみ） | auto-allow は**しない** / gated（Read/Glob/Write/Bash）は**する** | レジストリで `auto-allow` のものだけ allowedTools に入り canUseTool をスキップする |
 | advisor | なし | しない | ツールを一切持たないので、判定を受ける機会がない |
 | researcher | 3つ（Read, Write, Glob） | **する** | Read / Write / Glob を使うたびに毎回判定される |
 
-結果として、`createToolPermissionGuard()` 内の判定ロジック（skills/ 配下のみ書き込み可、Bash は extract-video.ts のみ等）は**事実上 researcher のためのルール**となっている。
-関数名を `createToolPermissionGuard` としているのは、これが SDK の `canUseTool` コールバックとして全体に登録される仕組みであることを正確に表すためである。
+`createToolPermissionGuard()` 内の判定ロジック（skills/ 配下のみ書き込み可、Bash は extract-video.ts のみ等）は **root と researcher の双方に等しく適用される**。Read / Glob / Write / Bash を使うたびに毎回 canUseTool が発火するため、root が直接 Bash や Write を呼んでも安全境界が崩れない。
 
-### ツール実行時の二重チェック
+### ツール実行時のチェック（canUseTool）
 
 サブエージェントがツールを使おうとしたとき、2段階のチェックが走る。
 
@@ -653,9 +663,9 @@ flowchart TD
     Structure -->|Yes| BA["allow ✅"]
     Structure -->|No| BD2["deny ❌"]
 
-    Switch -->|"WebSearch / WebFetch / TaskOutput"| WEB["allow ✅<br>（無条件）"]
+    Switch -->|"Agent / WebSearch / WebFetch / TaskOutput"| WEB["allow ✅<br>（auto-allow のため<br>そもそも canUseTool をスキップ）"]
 
-    Switch -->|"その他（Edit等）"| DEFAULT["deny ❌<br>（未知のツールは全拒否）"]
+    Switch -->|"レジストリ未登録"| DEFAULT["deny ❌<br>（fail-safe）<br>※ tools には COACH_TOOLS = レジストリのキー集合<br>しか渡らないので原理的には到達しない"]
 ```
 
 ### スキルファイルの流れ
@@ -845,12 +855,12 @@ sequenceDiagram
 erDiagram
     sessions ||--o{ plans : "has"
     sessions ||--o{ advices : "has"
+    sessions ||--o{ session_images : "has"
     plans ||--o{ advices : "references"
 
     sessions {
         TEXT id PK
         TEXT goal
-        TEXT reference_image_path
         TEXT display_id
         TEXT display_name "default=''"
         TEXT started_at
@@ -875,12 +885,24 @@ erDiagram
         INTEGER timestamp_ms
         INTEGER is_restored "default=0, 復元されたアドバイスか"
     }
+
+    session_images {
+        TEXT id PK
+        TEXT session_id FK
+        TEXT file_path
+        TEXT label
+        INTEGER sort_order
+        TEXT image_type "reference|attachment"
+    }
 ```
 
 #### インデックス
 
 - `idx_plans_session` — plans.session_id
 - `idx_advices_session` — advices.session_id
+- `idx_session_images_session` — session_images.session_id
+
+> 旧 `sessions.reference_image_path` カラムは廃止され、参考画像は `session_images` テーブル（`image_type: "reference"`）に正規化されている。`sendMessage` の添付画像は同テーブルに `image_type: "attachment"` で保存される。
 
 ### セットアップフローの変化
 
@@ -891,7 +913,7 @@ erDiagram
 | 目標入力 | inquirer input | `<textarea>` |
 | プラン確認 | ターミナル表示 + Y/N | カード表示 + 承認/再生成ボタン |
 | アドバイス表示 | ターミナル出力 | ダッシュボード（リアルタイム） |
-| ユーザーメッセージ送信 | stdin入力 | メッセージ入力バー（⌘+Enter） |
+| ユーザーメッセージ送信 | stdin入力 | メッセージ入力バー（⌘+Enter で送信、⌘+V でクリップボード画像貼付） |
 | セッション履歴 | なし | SQLite永続化 + 一覧/復元UI |
 | セッション復元 | なし | 過去セッションのアドバイス履歴を引き継いで新セッション作成 |
 | セッションパージ | なし | 200件超の古いセッションを自動削除（画像ファイル含む） |
@@ -899,11 +921,14 @@ erDiagram
 ### CLI版との共存
 
 ```text
-bun run start      → packages/cli/src/index.ts    → @dcc/core（既存動作を維持）
-bun run start:web  → packages/server/src/index.ts  → @dcc/core + Hono + tRPC + DB
+bun run dev / bun run start  → server + client 同時起動（concurrently で並列）
+                                 server: bun --watch run packages/server/src/index.ts
+                                 client: bun run --filter @dcc/client dev (Vite)
+bun run start:web            → server 単体起動: packages/server/src/index.ts → @dcc/core + Hono + tRPC + DB
+bun run dev:cli              → CLI 版: packages/cli/src/index.ts → @dcc/core（既存動作を維持）
 ```
 
-コアロジック（`@dcc/core`）は両方から共有。CLI版は一切変更なし。
+コアロジック（`@dcc/core`）は両方から共有。CLI版は一切変更なし。`bun run dev` 系で `--filter` を介さず server を直接起動するのは、`process.cwd()` をリポジトリルートに固定してルート `.env` の auto-load を効かせるため。
 
 ## @dcc/server パッケージ内部構成
 
@@ -933,9 +958,11 @@ flowchart LR
 
     subgraph db ["データアクセス (src/db/)"]
         Database["database.ts<br>createDatabase()"]
-        Sessions["sessions.ts<br>CRUD + purge"]
+        Schema["schema.ts<br>drizzle テーブル定義"]
+        Sessions["sessions.ts<br>CRUD + purgeOldSessions()"]
         Plans["plans.ts<br>CRUD + stepStatus更新"]
         Advices["advices.ts<br>CRUD + copyAdvicesToSession()"]
+        SessionImages["session-images.ts<br>CRUD + copyReferenceImages()"]
     end
 
     Router --> Session & Plan & Setup & Display & Events & Debug
@@ -980,7 +1007,7 @@ sequenceDiagram
     participant API as session.restore
     participant DB as SQLite
 
-    UI->>API: restore({ sourceSessionId })
+    UI->>API: restore({ id })  ※id = 復元元セッションID
     API->>DB: findSessionById(sourceId)
     API->>DB: findPlanBySessionId(sourceId)
     API->>DB: insertSession(新セッション)
@@ -998,8 +1025,8 @@ sequenceDiagram
 セッション数が 200 を超えた場合、古いセッションを自動削除する。`setup.start` と `session.restore` の完了後に `setImmediate` で非同期実行される。
 
 - 現在のセッションは除外
-- カスケード削除: advices → plans → sessions
-- 関連する画像ファイルも削除（他セッションと共有していないもののみ）
+- カスケード削除: advices → plans → session_images → sessions
+- 削除対象セッションが参照していた画像ファイルも `unlink`（他セッションが参照していないファイルのみ削除）
 
 ## ユーザーメッセージ送信フロー
 
@@ -1013,6 +1040,7 @@ sequenceDiagram
     participant Loop as コーチングループ
 
     UI->>API: sendMessage({ sessionId, message, images? })
+    Note over API: 添付画像があれば<br>insertSessionImages(image_type: "attachment")<br>を別途実行
     API->>CS: submitMessage(sessionId, { text, imagePaths })
     CS->>Loop: loop.submitMessage(message)
     Note over Loop: messageBox にバッファ<br>→ waitForNextRound 中断<br>→ trigger=user_message でラウンド実行<br>→ diff スキップで即座に AI 呼び出し
@@ -1052,7 +1080,7 @@ stateDiagram-v2
 | フェーズ | ページ | 主なコンポーネント |
 |---------|-------|------------------|
 | setup | SetupPage | DisplaySelector, ReferenceUploader, GoalInput, PlanReview |
-| coaching | DashboardPage | LatestAdvice, PlanProgress, AdviceTimeline, MessageInput, Switch（モードトグル） |
+| coaching | DashboardPage | LatestAdvice, PlanProgress, AdviceTimeline, MessageInput（⌘+V で画像貼付対応）, Switch（モードトグル） |
 | sessions | SessionListPage / SessionDetailPage | セッション一覧, 復元ボタン, 過去アドバイス閲覧 |
 
 ### SSE サブスクリプション
@@ -1063,7 +1091,8 @@ stateDiagram-v2
 |------------|------|
 | `advice` | キャッシュの `advices` に追加 + ローディング解除 |
 | `silent` / `engine_error` / `no_change` / `diff_skipped` / `session_lost` / `capture_failed` | ローディング解除のみ |
-| `querying` | 「次へ進む」ローディング表示開始 |
+| `querying` | 「次へ進む」ローディング表示開始 + `onToolActivity("AIに問い合わせ中...")` |
+| `tool_activity` | `onToolActivity(message)` でローディング表示文言を動的に更新（DB 永続化なし） |
 | `mode_changed` | キャッシュの `mode` を上書き、Switch 同期 |
 | `plan_step_updated` | プランステップの status を更新 |
 | `stopped` | キャッシュの `endedAt` を埋めて UI を終端状態に |

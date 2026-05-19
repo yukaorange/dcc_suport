@@ -1,6 +1,6 @@
 # @dcc/core リーディングガイド
 
-> 最終更新: 2026-04-13
+> 最終更新: 2026-04-27
 
 ## このパッケージの役割
 
@@ -17,7 +17,7 @@
 ④ prompts.ts        — AIへの指示の全容（trigger ベースの分岐）
 ⑤ engine.ts         — Claude SDK呼出の仕組み、onToolUse、セッション継続
 ⑥ agents.ts         — サブエージェント（researcher）の定義
-⑦ skills.ts         — スキルファイル収集、ツール権限ガード、Bashバリデーション
+⑦ skills.ts         — スキルファイル収集、ツール権限レジストリ（COACH_TOOL_POLICIES）、Bashバリデーション
 ⑧ planner.ts        — プラン生成（セットアップ時のみ使用）
 ⑨ capture.ts + diff.ts — スクリーンキャプチャと差分検出
 ```
@@ -36,7 +36,7 @@ packages/core/src/
 ├── engine.ts           ← Claude Agent SDK ラッパー。onToolUseコールバック対応
 ├── prompts.ts          ← rootエージェントのシステム/ユーザープロンプト構築（trigger 軸で分岐）
 ├── agents.ts           ← サブエージェント定義（researcher のみ実質稼働）
-├── skills.ts           ← スキルファイルパス収集・ツール権限ガード・Bashコマンド検証
+├── skills.ts           ← スキルファイル収集 / ツール権限レジストリ（COACH_TOOL_POLICIES, COACH_TOOLS, COACH_ALLOWED_TOOLS）/ canUseTool 実装 / Bashコマンド検証
 │
 │ ── キャプチャ・差分 ──
 ├── capture.ts          ← スクリーンキャプチャ（screenshot-desktop + sharp）
@@ -235,43 +235,68 @@ type UserMessage = {
 };
 ```
 
-### ツール権限の二重チェック（handleToolUse + allowedTools）
+### ツール権限の一元管理（COACH_TOOL_POLICIES レジストリ）
 
-`invokeClaude()` に渡す権限設定は3層構造になっている。
+`invokeClaude()` に渡す権限設定は本来 4 箇所に分散していた。これらを `skills.ts` の `COACH_TOOL_POLICIES` レジストリ 1 箇所に集約し、`tools` / `allowedTools` / `canUseTool` を自動導出する設計に変更している。
 
-```text
-tools:        ["Read", "Agent", "WebSearch", "WebFetch", "Write", "Bash", "Glob", "TaskOutput"]
-                ↑ セッション全体で「存在を認識する」ツール一覧
-
-allowedTools: ["Read", "Agent", "Bash", "WebSearch", "Write", "TaskOutput"]
-                ↑ root が自動承認で使えるツール（canUseTool をスキップする）
-
-canUseTool:   createToolPermissionGuard()
-                ↑ allowedTools に含まれないツールの実行時に呼ばれる権限チェック
-```
-
-**問題**: `allowedTools` に入れたツールは `canUseTool` をバイパスする。つまり root が使う Bash や Write は `canUseTool` のチェックを受けない。
-
-**解決策**: `onToolUse` コールバックで二重チェック。
+| 場所 | 役割 | 現状の出元 |
+|---|---|---|
+| `tools: [...]` (coach-loop.ts) | そもそも使えるツールの一覧 | `[...COACH_TOOLS]`（レジストリのキー集合） |
+| `allowedTools: [...]` (coach-loop.ts) | canUseTool をスキップして自動承認するツール | `[...COACH_ALLOWED_TOOLS]`（`auto-allow` のみ） |
+| `canUseTool` (skills.ts) | ツールごとの allow / deny 判定ロジック | `createToolPermissionGuard()` がレジストリを引くだけ |
+| `onToolUse` (coach-loop.ts) | 通知・警告（許可判定はしない） | `createHandleToolUse()` + `warnOnRiskyToolUsage()` |
 
 ```mermaid
 flowchart LR
-    A["rootがBashを実行"] --> B{"allowedTools に\nBash がある？"}
-    B -->|Yes| C["canUseTool スキップ\n（SDK の仕様）"]
-    C --> D["onToolUse 発火\nhandleToolUse()"]
-    D --> E{"validateBashCommand()"}
-    E -->|不正| F["throw Error\nセッション中断"]
-    E -->|OK| G["実行を許可"]
+    REG["COACH_TOOL_POLICIES<br/>(skills.ts)"]
+    REG -->|"Object.keys()"| T["COACH_TOOLS"]
+    REG -->|"kind === auto-allow を抽出"| AT["COACH_ALLOWED_TOOLS"]
+    REG -->|"policy.check(input)"| CUT["createToolPermissionGuard()"]
 
-    style D fill:#fff3e0
-    style F fill:#ffebee
+    T -->|"tools: [...COACH_TOOLS]"| Loop["coach-loop.ts"]
+    AT -->|"allowedTools: [...COACH_ALLOWED_TOOLS]"| Loop
+    CUT -->|"canUseTool"| Loop
+
+    style REG fill:#e8eaf6,stroke:#5c6bc0
 ```
 
-`handleToolUse` のチェック内容:
+レジストリは `auto-allow`（無条件で許可）と `gated`（毎回 check 関数で判定）の 2 種類しか取らない構造のため、「`gated` なのに `allowedTools` に入れて canUseTool の deny が silent bypass される」ミスが**書けなくなる**。
 
-- **Bash**: `validateBashCommand()` で `bun run extract-video.ts <youtube-url>` のみ許可。加えて、extract-video が `run_in_background: true` なしで同期実行された場合は警告ログを出力
-- **Write**: `skills/` ディレクトリ配下のみ許可
-- その他: ログ出力のみ
+```ts
+// skills.ts (抜粋)
+export const COACH_TOOL_POLICIES: Readonly<Record<string, ToolPolicy>> = {
+  Read:       { kind: "gated", check: (input) => checkReadPermission("Read", input) },
+  Glob:       { kind: "gated", check: (input) => checkReadPermission("Glob", input) },
+  Write:      { kind: "gated", check: (input) => checkWritePermission(input, ...) },
+  Bash:       { kind: "gated", check: checkBashPermission },
+  Agent:      { kind: "auto-allow" },
+  WebSearch:  { kind: "auto-allow" },
+  WebFetch:   { kind: "auto-allow" },
+  TaskOutput: { kind: "auto-allow" },
+};
+```
+
+不変条件は `test/tool-permissions.test.ts` で固定されている。
+
+#### onToolUse は通知層だけ（throw しない）
+
+旧実装は `onToolUse` (= `handleToolUse`) で Bash/Write の不正を `throw` していたが、これは「ラウンドごとセッションを殺す」副作用が大きすぎた。現在は `createHandleToolUse()` 内で `warnOnRiskyToolUsage()` が **`extract-video` の同期実行警告ログのみ** を出し、許可判定は完全に `canUseTool` 側に委譲している。
+
+```mermaid
+flowchart LR
+    A["root が Bash を実行"] --> B["canUseTool 発火<br/>(checkBashPermission)"]
+    B -->|"validateBashCommand"| C{結果}
+    C -->|不正| D["{ behavior: 'deny', message }<br/>SDK が Claude に deny メッセージ返却"]
+    C -->|OK| E["{ behavior: 'allow',<br/>updatedInput: input }"]
+    E --> F["SDK がツール実行"]
+    F --> G["onToolUse 発火<br/>(tool_activity イベント発火 +<br/>extract-video の同期警告のみ)"]
+
+    style B fill:#fff3e0
+    style D fill:#ffebee
+    style E fill:#e8f5e9
+```
+
+> **`updatedInput: input` を必ず返す理由**: SDK は allow 応答に `updatedInput` が無いと「Orphaned permission: updatedInput is undefined」警告とフォールバック経路を走り、特に `run_in_background: true` の Bash で下流バリデーション（Zod）が失敗してツール実行が ZodError として観測される。型は `optional` だが、runtime は明示的な echo を要求するため、レジストリ経由の allow は常に `{ behavior: "allow", updatedInput: input }` を返す。
 
 ---
 
@@ -406,19 +431,30 @@ flowchart TD
     C --> D["system prompt に埋め込み\n→ researcher が必要なファイルを Read"]
 ```
 
-### ② ツール権限ガード（createToolPermissionGuard）
+### ② ツール権限レジストリと canUseTool（createToolPermissionGuard）
 
-`canUseTool` コールバックとして SDK に登録される。**allowedTools に含まれないツール**の実行時に呼ばれる。
+`COACH_TOOL_POLICIES` を引くだけのシンプルなコールバック。`allowedTools` に含まれるツール（auto-allow）は SDK が canUseTool をスキップするので、ここに来るのは `gated` ツールがほとんど。
 
 ```mermaid
 flowchart TD
-    A["ツール呼び出し"] --> B{ツール名？}
-    B -->|"Read / Glob"| C["skills/ または docs/ 配下のみ許可"]
-    B -->|"Write"| D["skills/ 配下のみ許可"]
-    B -->|"Bash"| E["validateBashCommand()\nbun run extract-video.ts のみ許可"]
-    B -->|"WebSearch / WebFetch / TaskOutput"| F["常に許可"]
-    B -->|"その他"| G["拒否"]
+    A["ツール呼び出し"] --> B["COACH_TOOL_POLICIES[toolName]"]
+    B --> C{policy?}
+    C -->|未登録| D["deny<br/>'is not registered'"]
+    C -->|"auto-allow"| E["allow<br/>(updatedInput: input)"]
+    C -->|"gated"| F["policy.check(input)"]
+    F --> G{結果}
+    G -->|allow| H["allow<br/>(updatedInput: input)"]
+    G -->|deny| I["deny<br/>(message)"]
 ```
+
+| ツール | policy | 判定内容 |
+|---|---|---|
+| Read / Glob | gated | `skills/` または `docs/` 配下のみ許可 |
+| Write | gated | `skills/` 配下のみ許可 |
+| Bash | gated | `validateBashCommand()` で `bun run extract-video.ts <youtube-url>` のみ許可 |
+| Agent / WebSearch / WebFetch / TaskOutput | auto-allow | 無条件で許可（`allowedTools` に入るので canUseTool 自体スキップ） |
+
+レジストリ未登録ツールは fail-safe として deny する。`tools` には `COACH_TOOLS = Object.keys(COACH_TOOL_POLICIES)` しか渡らないため、原理的にレジストリ外のツールは Claude から呼ばれない。
 
 ### validateBashCommand の検証フロー
 
@@ -531,7 +567,7 @@ flowchart LR
 |---|---|---|
 | プロンプト | 「Write の file_path は必ず `skills/` 仮想パス」と明示 | `prompts.ts` のステップ4 |
 | manifest | `relative(SKILLS_ROOT, ...)` で `skills/...` 形式に統一 | `skills.ts:formatManifest` |
-| ガード | `resolveSkillPath()` で `skills/` を SKILLS_ROOT 基準に解決 | `skills.ts` + `coach-loop.ts:handleToolUse` |
+| ガード | `resolveSkillPath()` で `skills/` を SKILLS_ROOT 基準に解決 | `skills.ts:checkWritePermission / checkReadPermission`（canUseTool 経由） |
 
 これら3つが揃うことで、サーバーの cwd がどこであろうが、LLM がどう書こうが、最終的に `SKILLS_ROOT` 配下にしか書き込めない契約が成立する。
 
@@ -629,5 +665,6 @@ coach-loop.ts 内で定義されている非公開の構造:
 | `shouldBypassDiffCheck()` | trigger ごとに diff チェックを skip するか判定 |
 | `checkScreenDiff()` | diff 結果を DiffCheckResult に変換 |
 | `deriveNextState()` | 次ラウンド用の LoopState を導出（不変更新） |
-| `describeToolActivity()` | ツール名と input からユーザー向けの進捗メッセージを動的に組み立てる |
-| `createHandleToolUse(onEvent)` | ツール実行時の安全チェック（Bash/Write）+ `tool_activity` イベント発火のクロージャ生成 |
+| `describeToolActivity()` | ツール名と input からユーザー向けの進捗メッセージを動的に組み立てる（`STATIC_TOOL_MESSAGES` lookup + ファイル/Bash 用の動的整形） |
+| `warnOnRiskyToolUsage()` | extract-video が `run_in_background: true` なしで同期実行された場合の警告ログ。throw はしない（許可判定は canUseTool 側に委譲） |
+| `createHandleToolUse(onEvent)` | `describeToolActivity` で `tool_activity` イベントを発火 + `warnOnRiskyToolUsage` を呼ぶクロージャ生成。許可判定は行わない |

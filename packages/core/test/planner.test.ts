@@ -70,4 +70,49 @@ describe("generatePlan", () => {
     expect(result.plan.steps).toHaveLength(2);
     expect(result.plan.steps[0].status).toBe("pending");
   });
+
+  test("model指定時はinvokeClaudeにmodelが引き渡される", async () => {
+    invokeClaude.mockClear();
+    const planJson = JSON.stringify({
+      goal: "ロゴデザイン",
+      referenceSummary: "ミニマルなベクターロゴ",
+      steps: [{ index: 1, application: "Illustrator", description: "ベース形状の作成" }],
+    });
+    invokeClaude.mockResolvedValue({
+      isOk: true,
+      result: `\`\`\`json\n${planJson}\n\`\`\``,
+      sessionId: "plan-session",
+      rawMessages: [],
+    });
+
+    await generatePlan({
+      referenceImages: [{ path: "/tmp/ref.png", label: "" }],
+      goalDescription: "ロゴを作りたい",
+      model: "claude-opus-5",
+    });
+
+    expect(invokeClaude.mock.calls[0][0].model).toBe("claude-opus-5");
+  });
+
+  test("model未指定時はinvokeClaudeのmodelがundefinedになる", async () => {
+    invokeClaude.mockClear();
+    const planJson = JSON.stringify({
+      goal: "ロゴデザイン",
+      referenceSummary: "ミニマルなベクターロゴ",
+      steps: [{ index: 1, application: "Illustrator", description: "ベース形状の作成" }],
+    });
+    invokeClaude.mockResolvedValue({
+      isOk: true,
+      result: `\`\`\`json\n${planJson}\n\`\`\``,
+      sessionId: "plan-session",
+      rawMessages: [],
+    });
+
+    await generatePlan({
+      referenceImages: [{ path: "/tmp/ref.png", label: "" }],
+      goalDescription: "ロゴを作りたい",
+    });
+
+    expect(invokeClaude.mock.calls[0][0].model).toBeUndefined();
+  });
 });

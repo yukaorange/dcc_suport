@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { SdkVersionBanner } from "./sdk-version-banner";
 
 type LayoutProps = {
   readonly children: ReactNode;
@@ -47,6 +48,7 @@ export function Layout({
           )}
         </nav>
       </header>
+      <SdkVersionBanner />
       <main className="mx-auto max-w-6xl p-6">{children}</main>
     </div>
   );

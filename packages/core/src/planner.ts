@@ -39,6 +39,7 @@ type GeneratePlanInput = {
   readonly goalDescription: string;
   readonly revisionFeedback?: string;
   readonly previousPlan?: Plan;
+  readonly model?: string;
   readonly signal?: AbortSignal;
 };
 
@@ -158,6 +159,7 @@ export async function generatePlan(input: GeneratePlanInput): Promise<GeneratePl
     allowedTools: ["Read"],
     maxTurns: 5,
     timeoutMs: 120_000,
+    model: input.model,
     signal: input.signal,
   });
 

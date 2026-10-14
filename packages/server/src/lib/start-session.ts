@@ -1,5 +1,5 @@
 import { unlink } from "node:fs/promises";
-import type { Plan } from "@dcc/core";
+import type { Plan, SelectedModel } from "@dcc/core";
 import type { DrizzleDb } from "../db/database";
 import { insertPlan } from "../db/plans";
 import { insertSessionImages } from "../db/session-images";
@@ -18,6 +18,7 @@ type StartSessionParams = {
   readonly displayId: string;
   readonly displayName: string;
   readonly plan: Plan | null;
+  readonly model: SelectedModel | null;
 };
 
 type SessionRecord = {
@@ -90,6 +91,7 @@ export async function startSession(
     displayId: params.displayId,
     referenceImages: params.referenceImages,
     plan: params.plan,
+    initialModel: params.model,
   });
 
   schedulePurge(deps.db, sessionId);

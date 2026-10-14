@@ -6,7 +6,7 @@ import type { CoachConfig } from "./config";
 import { computeDiff } from "./diff";
 import { checkSessionContinuity, type EngineResult, invokeClaude } from "./engine";
 import { YOUTUBE_URL_PATTERN } from "./gemini";
-import type { LoopMode, RoundTrigger, UserMessage } from "./loop-types";
+import type { LoopMode, RoundTrigger, SelectedModel, UserMessage } from "./loop-types";
 import { COACH_TEMP_DIR } from "./paths";
 import type { Plan, PlanStepStatus } from "./planner";
 import { buildCoachSystemPrompt, buildCoachUserPrompt, type RestoredAdvice } from "./prompts";
@@ -112,6 +112,9 @@ type LoopEvent =
     }
   | { readonly kind: "tool_activity"; readonly message: string }
   | { readonly kind: "mode_changed"; readonly mode: LoopMode }
+  | { readonly kind: "model_changed"; readonly model: SelectedModel | null }
+  // SDK の init メッセージが報告した「実際に使用されたモデル」。選択値のエコーではない
+  | { readonly kind: "model_detected"; readonly model: string }
   | { readonly kind: "stopped" };
 
 export type { LoopEvent, CoachAdvice };
@@ -232,6 +235,7 @@ type CoachLoopOptions = {
   readonly skillManifest: string | null;
   readonly previousAdvices: readonly RestoredAdvice[];
   readonly initialMode?: LoopMode;
+  readonly initialModel?: SelectedModel | null;
 };
 
 type CoachLoopHandle = {
@@ -239,6 +243,8 @@ type CoachLoopHandle = {
   readonly submitMessage: (message: UserMessage) => void;
   readonly getMode: () => LoopMode;
   readonly setMode: (mode: LoopMode) => void;
+  readonly getModel: () => SelectedModel | null;
+  readonly setModel: (model: SelectedModel | null) => void;
   readonly requestNextRound: () => void;
 };
 
@@ -249,6 +255,7 @@ type LoopState = {
   readonly sessionId: string | undefined;
   readonly roundIndex: number;
   readonly plan: Plan | null;
+  readonly detectedModel: string | null;
 };
 
 const SILENT_MARKER = "__SILENT__";
@@ -321,11 +328,17 @@ function deriveNextState(
     ? (engineResult.sessionId ?? current.sessionId)
     : current.sessionId;
 
+  const detectedModel =
+    engineResult?.isOk && engineResult.model !== undefined
+      ? engineResult.model
+      : current.detectedModel;
+
   return {
     previousImage: newImage,
     sessionId,
     roundIndex: current.roundIndex + 1,
     plan: current.plan,
+    detectedModel,
   };
 }
 
@@ -410,6 +423,7 @@ async function executeOneRound(
   state: LoopState,
   options: CoachLoopOptions,
   input: RoundInput,
+  selectedModel: SelectedModel | null,
 ): Promise<LoopState> {
   const { config, onEvent } = options;
 
@@ -479,7 +493,9 @@ async function executeOneRound(
     maxTurns: ADVISOR_MAX_TURNS,
     timeoutMs: ADVISOR_TIMEOUT_MS,
     signal: options.signal,
-    effort: "high",
+    model: selectedModel?.value,
+    // effort 非対応モデル（supportsEffort: false）に effort を渡すと SDK エラーになるため省略する
+    effort: selectedModel === null || selectedModel.supportsEffort ? "high" : undefined,
     thinking: hasYouTubeUrl ? { type: "adaptive" } : { type: "disabled" },
   });
 
@@ -493,6 +509,10 @@ async function executeOneRound(
     return deriveNextState(state, currentImage, engineResult);
   }
 
+  if (engineResult.model !== undefined && engineResult.model !== state.detectedModel) {
+    onEvent({ kind: "model_detected", model: engineResult.model });
+  }
+
   const continuity = checkSessionContinuity(engineResult, isFirstRound);
   if (!continuity.continuable) {
     onEvent({ kind: "session_lost", reason: continuity.reason });
@@ -501,6 +521,7 @@ async function executeOneRound(
       sessionId: undefined,
       roundIndex: state.roundIndex + 1,
       plan: state.plan,
+      detectedModel: engineResult.model ?? state.detectedModel,
     };
   }
 
@@ -527,11 +548,15 @@ export function startCoachLoop(options: CoachLoopOptions): CoachLoopHandle {
   const nextRoundGate = createNextRoundGate();
   const modeController = createModeController(options.initialMode ?? "manual");
 
+  // 選択中モデル。切替は次ラウンドの invokeClaude から反映される（実行中ラウンドには影響しない）
+  let selectedModel: SelectedModel | null = options.initialModel ?? null;
+
   let state: LoopState = {
     previousImage: null,
     sessionId: undefined,
     roundIndex: 0,
     plan: options.plan,
+    detectedModel: null,
   };
 
   // 次に実行すべきラウンドの trigger を決定する。
@@ -597,7 +622,7 @@ export function startCoachLoop(options: CoachLoopOptions): CoachLoopHandle {
         if (options.signal.aborted) break;
         if (input === null) continue;
 
-        state = await executeOneRound(state, options, input);
+        state = await executeOneRound(state, options, input, selectedModel);
       }
     } finally {
       await cleanupTemp();
@@ -616,6 +641,15 @@ export function startCoachLoop(options: CoachLoopOptions): CoachLoopHandle {
       if (mode === "auto") {
         nextRoundGate.request();
       }
+    },
+    getModel: () => selectedModel,
+    setModel: (model) => {
+      const isSameModel =
+        (selectedModel === null && model === null) ||
+        (selectedModel !== null && model !== null && selectedModel.value === model.value);
+      if (isSameModel) return;
+      selectedModel = model;
+      options.onEvent({ kind: "model_changed", model });
     },
     requestNextRound: nextRoundGate.request,
   };

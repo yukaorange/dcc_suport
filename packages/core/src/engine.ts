@@ -13,6 +13,8 @@ type EngineSuccess = {
   readonly isOk: true;
   readonly result: string;
   readonly sessionId: string | undefined;
+  // SDK の system/init メッセージが報告した、実際に使用されたモデル名
+  readonly model?: string;
   readonly rawMessages: readonly unknown[];
 };
 
@@ -93,6 +95,7 @@ function releaseQueryLock(startTime: number): void {
 type MessageExtract = {
   readonly sessionId: string | undefined;
   readonly resultText: string | undefined;
+  readonly model: string | undefined;
 };
 
 function isTypedMessage(msg: unknown): msg is Record<string, unknown> & { type: string } {
@@ -100,18 +103,21 @@ function isTypedMessage(msg: unknown): msg is Record<string, unknown> & { type: 
 }
 
 function extractFromMessage(message: unknown): MessageExtract {
-  if (!isTypedMessage(message)) return { sessionId: undefined, resultText: undefined };
+  if (!isTypedMessage(message)) {
+    return { sessionId: undefined, resultText: undefined, model: undefined };
+  }
 
   let sessionId: string | undefined;
   let resultText: string | undefined;
+  let model: string | undefined;
 
-  if (
-    message.type === "system" &&
-    "subtype" in message &&
-    message.subtype === "init" &&
-    "session_id" in message
-  ) {
-    sessionId = message.session_id as string;
+  if (message.type === "system" && "subtype" in message && message.subtype === "init") {
+    if ("session_id" in message) {
+      sessionId = message.session_id as string;
+    }
+    if ("model" in message && typeof message.model === "string") {
+      model = message.model;
+    }
   }
 
   if (
@@ -123,7 +129,7 @@ function extractFromMessage(message: unknown): MessageExtract {
     resultText = message.result as string;
   }
 
-  return { sessionId, resultText };
+  return { sessionId, resultText, model };
 }
 
 function classifyAbortReason(
@@ -208,6 +214,7 @@ type StreamResult = {
   readonly rawMessages: unknown[];
   readonly sessionId: string | undefined;
   readonly resultText: string | undefined;
+  readonly model: string | undefined;
   readonly error: unknown | null;
 };
 
@@ -279,6 +286,7 @@ async function consumeQueryStream(
   const rawMessages: unknown[] = [];
   let sessionId: string | undefined;
   let resultText: string | undefined;
+  let model: string | undefined;
 
   try {
     const queryStream = query({
@@ -292,12 +300,13 @@ async function consumeQueryStream(
       const extracted = extractFromMessage(message);
       if (extracted.sessionId) sessionId = extracted.sessionId;
       if (extracted.resultText) resultText = extracted.resultText;
+      if (extracted.model) model = extracted.model;
     }
   } catch (e) {
-    return { rawMessages, sessionId, resultText, error: e };
+    return { rawMessages, sessionId, resultText, model, error: e };
   }
 
-  return { rawMessages, sessionId, resultText, error: null };
+  return { rawMessages, sessionId, resultText, model, error: null };
 }
 
 export async function invokeClaude(options: InvokeClaudeOptions): Promise<EngineResult> {
@@ -359,6 +368,7 @@ export async function invokeClaude(options: InvokeClaudeOptions): Promise<Engine
     isOk: true,
     result: stream.resultText,
     sessionId: stream.sessionId,
+    model: stream.model,
     rawMessages: stream.rawMessages,
   };
 }

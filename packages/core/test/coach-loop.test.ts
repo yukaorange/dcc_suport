@@ -556,3 +556,174 @@ describe("LoopMode", () => {
     expect(modeEvent).toEqual({ kind: "mode_changed", mode: "auto" });
   });
 });
+
+describe("SelectedModel", () => {
+  test("initialModel指定時、invokeClaudeにmodelが渡りeffortは維持される", async () => {
+    captureScreen.mockReset();
+    invokeClaude.mockReset();
+    captureScreen.mockResolvedValue({ isOk: true, image: FAKE_IMAGE });
+    invokeClaude.mockResolvedValue({
+      isOk: true,
+      result: "advice",
+      sessionId: "x",
+      rawMessages: [],
+    });
+    checkSessionContinuity.mockReturnValue({ continuable: true });
+
+    const { abortController, onEvent } = collectEvents("advice");
+    const handle = startCoachLoop({
+      config: { ...defaultConfig, intervalSeconds: 0 },
+      signal: abortController.signal,
+      onEvent,
+      referenceImages: [],
+      plan: null,
+      skillManifest: null,
+      previousAdvices: [],
+      initialMode: "manual",
+      initialModel: { value: "claude-opus-5", supportsEffort: true },
+    });
+
+    handle.requestNextRound();
+    await handle.loopFinished;
+
+    const callArg = invokeClaude.mock.calls[0][0];
+    expect(callArg.model).toBe("claude-opus-5");
+    expect(callArg.effort).toBe("high");
+    expect(handle.getModel()).toEqual({ value: "claude-opus-5", supportsEffort: true });
+  });
+
+  test("effort非対応モデルに切替えると次ラウンドはeffortなしで実行される", async () => {
+    captureScreen.mockReset();
+    invokeClaude.mockReset();
+    captureScreen.mockResolvedValue({ isOk: true, image: FAKE_IMAGE });
+    invokeClaude.mockResolvedValue({
+      isOk: true,
+      result: "advice",
+      sessionId: "x",
+      rawMessages: [],
+    });
+    checkSessionContinuity.mockReturnValue({ continuable: true });
+
+    const { abortController, onEvent } = collectEvents("advice");
+    const handle = startCoachLoop({
+      config: { ...defaultConfig, intervalSeconds: 0 },
+      signal: abortController.signal,
+      onEvent,
+      referenceImages: [],
+      plan: null,
+      skillManifest: null,
+      previousAdvices: [],
+      initialMode: "manual",
+    });
+
+    handle.setModel({ value: "claude-haiku-4-5", supportsEffort: false });
+    handle.requestNextRound();
+    await handle.loopFinished;
+
+    const callArg = invokeClaude.mock.calls[0][0];
+    expect(callArg.model).toBe("claude-haiku-4-5");
+    expect(callArg.effort).toBeUndefined();
+  });
+
+  test("モデル未指定時はmodelなし・effort highでinvokeClaudeが呼ばれる", async () => {
+    captureScreen.mockReset();
+    invokeClaude.mockReset();
+    captureScreen.mockResolvedValue({ isOk: true, image: FAKE_IMAGE });
+    invokeClaude.mockResolvedValue({
+      isOk: true,
+      result: "advice",
+      sessionId: "x",
+      rawMessages: [],
+    });
+    checkSessionContinuity.mockReturnValue({ continuable: true });
+
+    const { abortController, onEvent } = collectEvents("advice");
+    const handle = startCoachLoop({
+      config: { ...defaultConfig, intervalSeconds: 0 },
+      signal: abortController.signal,
+      onEvent,
+      referenceImages: [],
+      plan: null,
+      skillManifest: null,
+      previousAdvices: [],
+      initialMode: "manual",
+    });
+
+    handle.requestNextRound();
+    await handle.loopFinished;
+
+    const callArg = invokeClaude.mock.calls[0][0];
+    expect(callArg.model).toBeUndefined();
+    expect(callArg.effort).toBe("high");
+  });
+
+  test("setModelはmodel_changedを発火し、同一モデルでは再発火しない", async () => {
+    const abortController = new AbortController();
+    const events: LoopEvent[] = [];
+    const handle = startCoachLoop({
+      config: { ...defaultConfig, intervalSeconds: 0 },
+      signal: abortController.signal,
+      onEvent: (e) => events.push(e),
+      referenceImages: [],
+      plan: null,
+      skillManifest: null,
+      previousAdvices: [],
+      initialMode: "manual",
+    });
+
+    handle.setModel({ value: "claude-opus-5", supportsEffort: true });
+    handle.setModel({ value: "claude-opus-5", supportsEffort: true });
+    handle.setModel(null);
+    abortController.abort();
+    await handle.loopFinished;
+
+    const modelEvents = events.filter((e) => e.kind === "model_changed");
+    expect(modelEvents).toEqual([
+      { kind: "model_changed", model: { value: "claude-opus-5", supportsEffort: true } },
+      { kind: "model_changed", model: null },
+    ]);
+  });
+
+  test("エンジンが報告した実モデルはmodel_detectedとして変化時のみ通知される", async () => {
+    captureScreen.mockReset();
+    invokeClaude.mockReset();
+    captureScreen.mockResolvedValue({ isOk: true, image: FAKE_IMAGE });
+    invokeClaude.mockResolvedValue({
+      isOk: true,
+      result: "advice",
+      sessionId: "x",
+      model: "claude-sonnet-5",
+      rawMessages: [],
+    });
+    checkSessionContinuity.mockReturnValue({ continuable: true });
+
+    const abortController = new AbortController();
+    const events: LoopEvent[] = [];
+    let adviceCount = 0;
+    const handle = startCoachLoop({
+      config: { ...defaultConfig, intervalSeconds: 0 },
+      signal: abortController.signal,
+      onEvent: (e) => {
+        events.push(e);
+        if (e.kind === "advice") {
+          adviceCount++;
+          // manual_next は diff チェックをバイパスするため2ラウンド目も確実に実行される
+          if (adviceCount === 1) handle.requestNextRound();
+          if (adviceCount >= 2) abortController.abort();
+        }
+      },
+      referenceImages: [],
+      plan: null,
+      skillManifest: null,
+      previousAdvices: [],
+      initialMode: "manual",
+    });
+
+    handle.requestNextRound();
+    await handle.loopFinished;
+
+    expect(adviceCount).toBe(2);
+    const detectedEvents = events.filter((e) => e.kind === "model_detected");
+    expect(detectedEvents).toEqual([{ kind: "model_detected", model: "claude-sonnet-5" }]);
+  });
+});

@@ -2,7 +2,9 @@ import type { Plan } from "@dcc/core";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 import { trpc } from "../../trpc";
+import { ModelSelector } from "../shared/model-selector";
 import { DisplaySelector } from "./display-selector";
 import { GoalInput } from "./goal-input";
 import { PlanReview } from "./plan-review";
@@ -22,6 +24,8 @@ export function SetupPage({ onCoachingStarted }: SetupPageProps) {
   const [goal, setGoal] = useState("");
   const [planId, setPlanId] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
+  // null はデフォルトモデル（CLI設定に従う）。プラン生成とセッション初期モデルの両方に使われる
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
 
   const generateMutation = trpc.plan.generate.useMutation();
   const startMutation = trpc.setup.start.useMutation();
@@ -38,6 +42,7 @@ export function SetupPage({ onCoachingStarted }: SetupPageProps) {
         label: img.label,
       })),
       goalDescription: goal,
+      model: selectedModel ?? undefined,
     });
 
     setPlanId(result.planId);
@@ -57,6 +62,7 @@ export function SetupPage({ onCoachingStarted }: SetupPageProps) {
       goalDescription: goal,
       revisionFeedback: feedback,
       previousPlanId: planId,
+      model: selectedModel ?? undefined,
     });
 
     setPlanId(result.planId);
@@ -92,6 +98,10 @@ export function SetupPage({ onCoachingStarted }: SetupPageProps) {
             />
             <ReferenceUploader images={referenceImages} onImagesChanged={setReferenceImages} />
             <GoalInput value={goal} onChange={setGoal} />
+            <div className="space-y-2">
+              <Label>使用モデル</Label>
+              <ModelSelector value={selectedModel} onChange={setSelectedModel} />
+            </div>
 
             {generateMutation.error !== null && (
               <p className="text-sm text-destructive">{generateMutation.error.message}</p>

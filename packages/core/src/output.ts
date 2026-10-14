@@ -61,6 +61,12 @@ export function printLoopEvent(event: LoopEvent): void {
     case "mode_changed":
       console.log(`  [mode] ${event.mode === "auto" ? "自動モード" : "手動モード"}に切替`);
       break;
+    case "model_changed":
+      console.log(`  [model] ${event.model === null ? "デフォルト" : event.model.value}に切替`);
+      break;
+    case "model_detected":
+      console.log(`  [model] 使用中: ${event.model}`);
+      break;
     case "stopped":
       console.log(`\n${SEPARATOR}`);
       console.log("  DCC Coach - セッション終了");

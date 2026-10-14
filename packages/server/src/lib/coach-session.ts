@@ -6,6 +6,7 @@ import {
   loadSkillManifest,
   type Plan,
   type RestoredAdvice,
+  type SelectedModel,
   startCoachLoop,
   type UserMessage,
 } from "@dcc/core";
@@ -29,6 +30,7 @@ type StartOptions = {
   readonly referenceImages: readonly { readonly path: string; readonly label: string }[];
   readonly plan: Plan | null;
   readonly previousAdvices?: readonly RestoredAdvice[];
+  readonly initialModel?: SelectedModel | null;
 };
 
 type SubmitMessageResult =
@@ -41,10 +43,13 @@ type CoachSessionHandle = {
   readonly getActiveSessionId: () => string | null;
   readonly isSessionActive: (sessionId: string) => boolean;
   readonly getMode: (sessionId: string) => LoopMode | null;
+  readonly getModel: (sessionId: string) => SelectedModel | null;
+  readonly getDetectedModel: (sessionId: string) => string | null;
   readonly start: (options: StartOptions) => Promise<void>;
   readonly stop: () => void;
   readonly submitMessage: (sessionId: string, message: UserMessage) => SubmitMessageResult;
   readonly setMode: (sessionId: string, mode: LoopMode) => ModeResult;
+  readonly setModel: (sessionId: string, model: SelectedModel | null) => ModeResult;
   readonly requestNextRound: (sessionId: string) => ModeResult;
 };
 
@@ -58,6 +63,8 @@ type ActiveState = {
 
 export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
   let activeState: ActiveState | null = null;
+  // SDK の init メッセージが報告した実モデル名。アクティブセッションは常に1つなので単一変数で持つ
+  let detectedModel: string | null = null;
 
   return {
     getActiveSessionId: () => activeState?.sessionId ?? null,
@@ -110,6 +117,10 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
               updatePlanStepStatus(deps.db, options.sessionId, event.stepIndex, event.newStatus);
               log.info(`step ${event.stepIndex} → ${event.newStatus}`);
               break;
+            case "model_detected":
+              detectedModel = event.model;
+              log.info(`model detected: ${event.model}`);
+              break;
           }
         } catch (e) {
           log.failed(`DB write: ${String(e)}`);
@@ -117,6 +128,7 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
       };
 
       log.info("starting coach loop...");
+      detectedModel = null;
       const loop = startCoachLoop({
         config: deps.config,
         signal: abortController.signal,
@@ -128,6 +140,7 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
         previousAdvices: options.previousAdvices ?? [],
         // 新規/復元ともに manual から開始。auto への切替はユーザー操作に委ねる。
         initialMode: "manual",
+        initialModel: options.initialModel ?? null,
       });
 
       activeState = { sessionId: options.sessionId, loop, abortController };
@@ -198,6 +211,24 @@ export function createCoachSession(deps: CoachSessionDeps): CoachSessionHandle {
         return { isOk: false, reason: "アクティブなセッションが見つかりません" };
       }
       activeState.loop.setMode(mode);
+      return { isOk: true };
+    },
+
+    getModel: (sessionId) => {
+      if (activeState === null || activeState.sessionId !== sessionId) return null;
+      return activeState.loop.getModel();
+    },
+
+    getDetectedModel: (sessionId) => {
+      if (activeState === null || activeState.sessionId !== sessionId) return null;
+      return detectedModel;
+    },
+
+    setModel: (sessionId, model) => {
+      if (activeState === null || activeState.sessionId !== sessionId) {
+        return { isOk: false, reason: "アクティブなセッションが見つかりません" };
+      }
+      activeState.loop.setModel(model);
       return { isOk: true };
     },
 

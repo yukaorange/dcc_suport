@@ -5,8 +5,10 @@ import { type ReactNode, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { formatEffectiveModelLabel, formatModelLabel } from "@/lib/model-label";
 import { useLoopEvents } from "../../hooks/use-loop-events";
 import { trpc } from "../../trpc";
+import { ModelSelector } from "../shared/model-selector";
 import { AdviceTimeline } from "./advice-timeline";
 import { LatestAdvice } from "./latest-advice";
 import { MessageInput } from "./message-input";
@@ -55,6 +57,17 @@ function CoachingFeed({
   });
 
   const utils = trpc.useUtils();
+  // invalidate による再取得はしない: GET 応答が SSE の model_detected 反映より後に届くと
+  // detectedModel が古い値に巻き戻るため、成功応答から selectedModel だけを書き換える。
+  // 失敗時はキャッシュ未変更（楽観更新なし）なので巻き戻し処理も不要。
+  const setModelMutation = trpc.session.setModel.useMutation({
+    onSuccess: (response) => {
+      utils.session.get.setData({ id: sessionId }, (prev) =>
+        prev ? { ...prev, selectedModel: response.selectedModel } : prev,
+      );
+    },
+  });
+
   const setModeMutation = trpc.session.setMode.useMutation({
     onMutate: async ({ mode: nextMode }) => {
       await utils.session.get.cancel({ id: sessionId });
@@ -78,6 +91,33 @@ function CoachingFeed({
 
   const badgeVariant = isCoachingStopped ? "secondary" : mode === "manual" ? "outline" : "default";
   const badgeLabel = isCoachingStopped ? "終了" : mode === "manual" ? "手動" : "自動";
+
+  // ModelSelector と同一クエリキーのため、実際のfetchは共有キャッシュに集約される
+  const { data: modelListData } = trpc.model.list.useQuery(undefined, {
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: 1,
+  });
+
+  // 「使用中」= SDK の init が報告した実モデル（ラウンド実行後に確定）、
+  // 「使用予定」= 現在の選択（デフォルト含む）が次ラウンドで解決されるモデル
+  const detectedLabel =
+    data.detectedModel !== null
+      ? formatModelLabel(data.detectedModel, modelListData?.models)
+      : null;
+  const plannedLabel = formatEffectiveModelLabel(
+    data.selectedModel?.value ?? null,
+    modelListData?.models,
+  );
+  const modelBadge =
+    detectedLabel !== null
+      ? {
+          prefix: "使用中",
+          label: detectedLabel,
+          title: `SDKが報告した実際の使用モデル: ${data.detectedModel}`,
+        }
+      : plannedLabel !== null
+        ? { prefix: "使用予定", label: plannedLabel, title: "次のラウンドで使用されるモデル" }
+        : null;
 
   const handleToggleMode = (checked: boolean) => {
     setModeMutation.mutate({ sessionId, mode: checked ? "auto" : "manual" });
@@ -103,12 +143,32 @@ function CoachingFeed({
             </span>
           </div>
         )}
+        {!isCoachingStopped && (
+          <div className="ml-auto flex items-center gap-2">
+            <ModelSelector
+              value={data.selectedModel?.value ?? null}
+              onChange={(modelValue) => setModelMutation.mutate({ sessionId, model: modelValue })}
+              disabled={setModelMutation.isPending}
+            />
+            {modelBadge !== null && (
+              <Badge variant="outline" className="rounded-full px-3 py-1" title={modelBadge.title}>
+                {modelBadge.prefix}: {modelBadge.label}
+              </Badge>
+            )}
+          </div>
+        )}
         {isCoachingStopped && (
           <Button variant="outline" size="sm" className="ml-auto" onClick={onBackToSetup}>
             新規セットアップ
           </Button>
         )}
       </div>
+
+      {setModelMutation.error !== null && (
+        <p className="text-sm text-destructive">
+          モデルの切替に失敗しました: {setModelMutation.error.message}
+        </p>
+      )}
 
       {latestAdvice !== null && (
         <LatestAdvice content={latestAdvice.content} roundIndex={latestAdvice.roundIndex} />

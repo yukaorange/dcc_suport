@@ -36,6 +36,8 @@ export const setupRouter = router({
           displayId: input.displayId,
           displayName: input.displayName,
           plan: cached.plan,
+          // プラン生成に使ったモデルをセッションの初期モデルとして引き継ぐ
+          model: cached.model,
         },
       );
 

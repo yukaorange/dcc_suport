@@ -76,6 +76,16 @@ export function useLoopEvents({
               prev ? { ...prev, mode: event.mode } : prev,
             );
             break;
+          case "model_changed":
+            utils.session.get.setData({ id: sessionId }, (prev) =>
+              prev ? { ...prev, selectedModel: event.model } : prev,
+            );
+            break;
+          case "model_detected":
+            utils.session.get.setData({ id: sessionId }, (prev) =>
+              prev ? { ...prev, detectedModel: event.model } : prev,
+            );
+            break;
           case "stopped": {
             // 「stopped を受信したらループ終端」という契約を client 側でも担保する。
             // backend で endSession() が DB エラーで失敗したケースでも、

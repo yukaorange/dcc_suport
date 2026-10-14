@@ -1,7 +1,15 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { extractToolUses } from "../src/engine";
 import type { EngineResult } from "../src/index";
-import { checkSessionContinuity } from "../src/index";
+import { checkSessionContinuity, invokeClaude } from "../src/index";
+
+const { query } = vi.hoisted(() => ({
+  query: vi.fn(),
+}));
+
+vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
+  query,
+}));
 
 describe("checkSessionContinuity", () => {
   test("失敗結果が渡された場合、継続不可とエラーメッセージを返す", () => {
@@ -62,6 +70,57 @@ describe("checkSessionContinuity", () => {
     const result = checkSessionContinuity(success, true);
 
     expect(result.continuable).toBe(true);
+  });
+});
+
+describe("invokeClaude", () => {
+  function mockQueryStream(messages: readonly unknown[]): void {
+    query.mockReturnValue(
+      (async function* () {
+        yield* messages;
+      })(),
+    );
+  }
+
+  test("initメッセージのmodelが成功結果に含まれる", async () => {
+    mockQueryStream([
+      { type: "system", subtype: "init", session_id: "session-1", model: "claude-sonnet-5" },
+      { type: "result", subtype: "success", result: "アドバイス本文" },
+    ]);
+
+    const result = await invokeClaude({ prompt: "テスト", timeoutMs: 5000 });
+
+    expect(result.isOk).toBe(true);
+    if (result.isOk) {
+      expect(result.model).toBe("claude-sonnet-5");
+      expect(result.sessionId).toBe("session-1");
+    }
+  });
+
+  test("initメッセージにmodelがない場合、成功結果のmodelはundefined", async () => {
+    mockQueryStream([
+      { type: "system", subtype: "init", session_id: "session-2" },
+      { type: "result", subtype: "success", result: "アドバイス本文" },
+    ]);
+
+    const result = await invokeClaude({ prompt: "テスト", timeoutMs: 5000 });
+
+    expect(result.isOk).toBe(true);
+    if (result.isOk) {
+      expect(result.model).toBeUndefined();
+    }
+  });
+
+  test("modelオプションがSDKのquery optionsに引き渡される", async () => {
+    mockQueryStream([{ type: "result", subtype: "success", result: "ok" }]);
+
+    await invokeClaude({ prompt: "テスト", timeoutMs: 5000, model: "claude-opus-5" });
+
+    expect(query).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({ model: "claude-opus-5" }),
+      }),
+    );
   });
 });
 

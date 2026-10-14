@@ -1,5 +1,5 @@
 import { unlink } from "node:fs/promises";
-import type { Plan } from "@dcc/core";
+import type { Plan, SelectedModel } from "@dcc/core";
 
 const TTL_MS = 30 * 60 * 1000;
 
@@ -7,6 +7,8 @@ type PendingPlan = {
   readonly plan: Plan;
   readonly referenceImages: readonly { readonly path: string; readonly label: string }[];
   readonly goalDescription: string;
+  // プラン生成に使ったモデル。セッション開始時に初期モデルとして引き継ぐ。null はデフォルト
+  readonly model: SelectedModel | null;
 };
 
 type CacheEntry = {

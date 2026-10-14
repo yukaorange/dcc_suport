@@ -1,4 +1,4 @@
-import { generatePlan } from "@dcc/core";
+import { generatePlan, type ModelChoice } from "@dcc/core";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { saveBase64Images } from "../../lib/image-store";
@@ -22,12 +22,23 @@ export const planRouter = router({
         goalDescription: z.string().min(5),
         revisionFeedback: z.string().optional(),
         previousPlanId: z.string().optional(),
+        model: z.string().min(1).max(200).optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
       const log = createTaggedLogger("plan.generate");
       log.started();
       log.info(`imageCount=${input.referenceImages.length}, goal="${input.goalDescription}"`);
+
+      // モデル指定はカタログ照合のホワイトリスト検証を通ったものだけ受け入れる
+      let selectedModel: ModelChoice | null = null;
+      if (input.model !== undefined) {
+        selectedModel = await ctx.modelCatalog.findByValue(input.model);
+        if (selectedModel === null) {
+          log.failed(`unknown model: ${input.model}`);
+          throw new TRPCError({ code: "BAD_REQUEST", message: "指定されたモデルは利用できません" });
+        }
+      }
 
       const imagesResult = await saveBase64Images(input.referenceImages);
       if (!imagesResult.isOk) {
@@ -52,6 +63,7 @@ export const planRouter = router({
         goalDescription: input.goalDescription,
         revisionFeedback: input.revisionFeedback,
         previousPlan,
+        model: selectedModel?.value,
       });
       log.info(`generatePlan result: isOk=${planResult.isOk}`);
 
@@ -65,6 +77,10 @@ export const planRouter = router({
         plan: planResult.plan,
         referenceImages,
         goalDescription: input.goalDescription,
+        model:
+          selectedModel === null
+            ? null
+            : { value: selectedModel.value, supportsEffort: selectedModel.supportsEffort },
       });
 
       log.completed();

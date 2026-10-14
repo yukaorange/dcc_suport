@@ -9,4 +9,12 @@ type UserMessage = {
   readonly imagePaths: readonly string[];
 };
 
-export type { LoopMode, RoundTrigger, UserMessage };
+// ユーザーが選択したモデル。null はデフォルト（CLI設定に従う）を意味する。
+// supportsEffort を一緒に持ち回るのは、effort 非対応モデルに effort を渡すと
+// SDK がエラーになるため、ラウンド実行時に effort を省略する判定に使うから。
+type SelectedModel = {
+  readonly value: string;
+  readonly supportsEffort: boolean;
+};
+
+export type { LoopMode, RoundTrigger, SelectedModel, UserMessage };

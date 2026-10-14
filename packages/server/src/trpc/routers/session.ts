@@ -1,4 +1,4 @@
-import type { LoopMode, PlanStepStatus } from "@dcc/core";
+import type { LoopMode, PlanStepStatus, SelectedModel } from "@dcc/core";
 import { TRPCError } from "@trpc/server";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -80,6 +80,8 @@ export const sessionRouter = router({
         isRestored: a.isRestored === 1,
       })),
       mode: ctx.coachSession.getMode(input.id),
+      selectedModel: ctx.coachSession.getModel(input.id),
+      detectedModel: ctx.coachSession.getDetectedModel(input.id),
     };
   }),
 
@@ -165,6 +167,39 @@ export const sessionRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });
       }
       return { success: true, mode: input.mode };
+    }),
+
+  setModel: publicProcedure
+    .input(
+      z.object({
+        sessionId: z.string().uuid(),
+        // null はデフォルトモデル（CLI設定に従う）への切替を意味する
+        model: z.string().min(1).max(200).nullable(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      if (!ctx.coachSession.isSessionActive(input.sessionId)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "アクティブなセッションが見つかりません",
+        });
+      }
+
+      // モデル指定はカタログ照合のホワイトリスト検証を通ったものだけ受け入れる
+      let selectedModel: SelectedModel | null = null;
+      if (input.model !== null) {
+        const found = await ctx.modelCatalog.findByValue(input.model);
+        if (found === null) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "指定されたモデルは利用できません" });
+        }
+        selectedModel = { value: found.value, supportsEffort: found.supportsEffort };
+      }
+
+      const result = ctx.coachSession.setModel(input.sessionId, selectedModel);
+      if (!result.isOk) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: result.reason });
+      }
+      return { success: true, selectedModel };
     }),
 
   requestNextRound: publicProcedure
